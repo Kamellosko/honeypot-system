@@ -11,21 +11,25 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./dashboard:/usr/share/nginx/html:ro
+      - ./dashboard:/usr/share/nginx/html:ro,z
     networks:
       - honeynet
     restart: unless-stopped
 
   server-collector:
-    image: alpine:latest
+    image: almalinux:9
     container_name: honeypot-server-stub
+    ports:
+      - "8000:8000"
     command: ["sh", "-c", "echo 'Serwer Javy...' && sleep infinity"]
     networks:
       - honeynet
 
   sensor-agent:
-    image: alpine:latest
+    image: almalinux:9
     container_name: honeypot-agent-stub
+    ports:
+      - "2222:2222"
     command: ["sh", "-c", "echo 'Agent C...' && sleep infinity"]
     networks:
       - honeynet
