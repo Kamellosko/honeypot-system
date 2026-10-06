@@ -1,0 +1,56 @@
+﻿<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Honeypot SOC Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <div>
+      <h1>HONEYPOT SOC DASHBOARD</h1>
+      <p style="color: #64748b; font-size: 0.8rem; margin-top: 4px;">
+        Rozproszony system detekcji i tarpit | Faza 0 (Szkielet statyczny)
+      </p>
+    </div>
+    <span class="badge">Status: Faza 0 (Szkielet)</span>
+  </header>
+
+  <section class="box">
+    <h3>Stan czujników (Liveness)</h3>
+    <p>
+      Sensor: <strong>sensor-01</strong> | 
+      Status: <span class="status-online">ONLINE</span> | 
+      Port wabika: <strong>2222 TCP</strong> | 
+      Heartbeat: <strong>30s</strong>
+    </p>
+  </section>
+
+  <section class="box">
+    <h3>Dziennik zdarzeń (Przykładowy format)</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Znacznik czasu</th>
+          <th>Sensor ID</th>
+          <th>IP Źródłowe</th>
+          <th>Typ zdarzenia</th>
+          <th>Port docelowy</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2026-10-06T12:00:00Z</td>
+          <td>sensor-01</td>
+          <td>192.168.1.105</td>
+          <td>raw_connection</td>
+          <td>2222</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+</body>
+</html>

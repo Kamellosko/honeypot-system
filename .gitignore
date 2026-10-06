@@ -1,0 +1,20 @@
+﻿# Windows
+Thumbs.db
+Desktop.ini
+
+# C Agent
+*.o
+*.exe
+honeypot-agent
+agent/honeypot-agent
+
+# Java Serwer
+target/
+*.class
+*.jar
+*.db
+*.sqlite
+
+# IDE
+.vscode/
+.idea/

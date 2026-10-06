@@ -1,0 +1,31 @@
+﻿version: '3.8'
+
+networks:
+  honeynet:
+    driver: bridge
+
+services:
+  dashboard:
+    image: nginx:alpine
+    container_name: honeypot-dashboard
+    ports:
+      - "8080:80"
+    volumes:
+      - ./dashboard:/usr/share/nginx/html:ro
+    networks:
+      - honeynet
+    restart: unless-stopped
+
+  server-collector:
+    image: alpine:latest
+    container_name: honeypot-server-stub
+    command: ["sh", "-c", "echo 'Serwer Javy...' && sleep infinity"]
+    networks:
+      - honeynet
+
+  sensor-agent:
+    image: alpine:latest
+    container_name: honeypot-agent-stub
+    command: ["sh", "-c", "echo 'Agent C...' && sleep infinity"]
+    networks:
+      - honeynet
