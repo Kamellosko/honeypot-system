@@ -6,7 +6,9 @@ import java.nio.file.Path;
 import pl.honeypot.server.api.ConfigHandler;
 import pl.honeypot.server.api.ErrorHandler;
 import pl.honeypot.server.api.EventHandler;
+import pl.honeypot.server.api.EventsQueryHandler;
 import pl.honeypot.server.api.HeartbeatHandler;
+import pl.honeypot.server.api.SensorsHandler;
 import pl.honeypot.server.store.ErrorStore;
 import pl.honeypot.server.store.EventStore;
 import pl.honeypot.server.store.HeartbeatStore;
@@ -35,13 +37,16 @@ public final class Main {
 
         Javalin app = Javalin.create(c -> c.showJavalinBanner = false);
 
-        // Agent -> server (agent always initiates, see projekt_honeypot.md section 2)
+        // Agent -> server (agent always initiates)
         app.get("/api/v1/config/{sensorId}", new ConfigHandler(sensors));
         app.post("/api/v1/events", new EventHandler(sensors, events));
         app.post("/api/v1/heartbeat", new HeartbeatHandler(sensors, heartbeats));
         app.post("/api/v1/errors", new ErrorHandler(sensors, errors));
 
-        // TODO phase 1: GET /api/v1/sensors, GET /api/v1/events
+        // Server -> operator (read-only views)
+        app.get("/api/v1/sensors", new SensorsHandler(sensors));
+        app.get("/api/v1/events", new EventsQueryHandler(events));
+
         // TODO phase 3: GET /api/v1/ioc
 
         app.start(cfg.bindAddress(), cfg.port());

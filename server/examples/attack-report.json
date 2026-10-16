@@ -1,6 +1,5 @@
 {
   "sensor_id": "sensor-01",
-  "port": 22,
   "state": "handling_conn",
   "mac": "02:42:ac:12:00:05",
   "src_ip": "172.18.0.5"

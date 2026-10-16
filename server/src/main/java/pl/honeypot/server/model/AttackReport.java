@@ -6,8 +6,6 @@ import java.util.Set;
 // Body of POST /api/v1/events
 public record AttackReport(
         @JsonProperty("sensor_id") String sensorId,
-        // Decoy port the attacker connected to (boxed to detect a missing field)
-        @JsonProperty("port") Integer port,
         @JsonProperty("state") String state,
         // Attacker MAC, null when not on the same L2 segment as the honeypot
         @JsonProperty("mac") String mac,

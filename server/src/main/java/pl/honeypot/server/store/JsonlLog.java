@@ -1,5 +1,6 @@
 package pl.honeypot.server.store;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
@@ -12,6 +13,8 @@ import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 // Append-only JSON Lines log: one record per line, UTF-8.
@@ -70,5 +73,32 @@ public final class JsonlLog {
             }
         }
         return id;
+    }
+
+    // Reads every record back, in the order they were written (oldest first).
+    // Blank or unparseable lines are skipped. Runs under the write lock so it
+    // never observes a half-written line.
+    public List<JsonNode> read() {
+        synchronized (lock) {
+            if (!Files.exists(file)) {
+                return List.of();
+            }
+            List<JsonNode> out = new ArrayList<>();
+            try (var lines = Files.lines(file, StandardCharsets.UTF_8)) {
+                lines.forEach(l -> {
+                    if (l.isBlank()) {
+                        return;
+                    }
+                    try {
+                        out.add(mapper.readTree(l));
+                    } catch (IOException ignored) {
+                        // Skip a corrupt line rather than failing the whole read.
+                    }
+                });
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            return out;
+        }
     }
 }

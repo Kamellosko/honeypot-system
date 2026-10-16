@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +34,19 @@ public final class SensorStore {
     }
 
     public record Liveness(String status, String lastSeen) {
+    }
+
+    // Full view of a sensor for GET /api/v1/sensors: provisioned config plus
+    // the in-memory liveness (status defaults to "unknown" until first seen).
+    public record SensorView(
+            @JsonProperty("sensor_id") String sensorId,
+            @JsonProperty("hostname") String hostname,
+            @JsonProperty("timeout_sec") int timeoutSec,
+            @JsonProperty("heartbeat_sec") int heartbeatSec,
+            @JsonProperty("srv_port") int srvPort,
+            @JsonProperty("ports") List<Integer> ports,
+            @JsonProperty("status") String status,
+            @JsonProperty("last_seen") String lastSeen) {
     }
 
     private final Map<String, SensorDef> defs;
@@ -103,5 +117,19 @@ public final class SensorStore {
 
     public Optional<Liveness> liveness(String sensorId) {
         return Optional.ofNullable(liveness.get(sensorId));
+    }
+
+    // All provisioned sensors with their current liveness, in file order.
+    public List<SensorView> list() {
+        List<SensorView> out = new ArrayList<>();
+        for (SensorDef d : defs.values()) {
+            Liveness lv = liveness.get(d.sensorId());
+            out.add(new SensorView(
+                    d.sensorId(), d.hostname(), d.timeoutSec(), d.heartbeatSec(), d.srvPort(),
+                    d.ports(),
+                    lv != null ? lv.status() : "unknown",
+                    lv != null ? lv.lastSeen() : null));
+        }
+        return out;
     }
 }

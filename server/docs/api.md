@@ -49,7 +49,6 @@ POST /api/v1/events
 ```json
 {
   "sensor_id": "sensor-01",
-  "port": 22,
   "state": "handling_conn",
   "mac": "02:42:ac:12:00:05",
   "src_ip": "172.18.0.5"
@@ -59,7 +58,6 @@ POST /api/v1/events
 | Pole | Typ | Wymagane | Opis |
 |------|-----|:--------:|------|
 | `sensor_id` | string | tak | ID honeypota |
-| `port` | int | tak | port, na który łączy się atakujący (1–65535) |
 | `state` | string | tak | stan agenta: `init`, `idle`, `handling_conn`, `shutdown`, `error` |
 | `mac` | string \| null | nie | MAC atakującego, `aa:bb:cc:dd:ee:ff` (wielkość liter dowolna) |
 | `src_ip` | string \| null | nie (zalecane) | IP atakującego |
