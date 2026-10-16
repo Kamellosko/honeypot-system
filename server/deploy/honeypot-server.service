@@ -1,0 +1,36 @@
+# systemd unit for the honeypot server.
+# Install:
+#   useradd --system --no-create-home --shell /sbin/nologin honeypot
+#   install -D target/honeypot-server.jar /opt/honeypot-server/honeypot-server.jar
+#   install -D config/server.properties /etc/honeypot-server/server.properties
+#   install -D config/sensors.json /etc/honeypot-server/sensors.json
+#     (set sensors.file=/etc/honeypot-server/sensors.json
+#      and data.dir=/var/lib/honeypot-server)
+#   cp deploy/honeypot-server.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now honeypot-server
+
+[Unit]
+Description=Honeypot central server (collector + API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=honeypot
+Group=honeypot
+ExecStart=/usr/bin/java -jar /opt/honeypot-server/honeypot-server.jar /etc/honeypot-server/server.properties
+Restart=on-failure
+RestartSec=5
+
+# Creates /var/lib/honeypot-server owned by the service user
+StateDirectory=honeypot-server
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+
+[Install]
+WantedBy=multi-user.target
