@@ -1,7 +1,7 @@
 # honeypot-server
 
-Centralny serwer (kolektor + REST API) w Javie 21. Używa Javalin i SQLite.
-Kontrakt API jest w [docs/api.md](docs/api.md).
+Centralny serwer (kolektor + REST API) w Javie 21. Używa Javalin, dane trzyma
+w plikach (bez bazy danych). Kontrakt API jest w [docs/api.md](docs/api.md).
 
 ## Struktura
 
@@ -9,21 +9,18 @@ Kontrakt API jest w [docs/api.md](docs/api.md).
 server/
 ├── pom.xml                         # Maven, buduje target/honeypot-server.jar
 ├── Dockerfile                      # build na Maven, runtime na almalinux:9
-├── config/server.properties        # port, ścieżka bazy, seed
+├── config/server.properties        # port, ścieżka sensors.json, katalog danych
+├── config/sensors.json             # pre-provisioned czujniki (sensor-01)
 ├── deploy/honeypot-server.service  # unit systemd (instalacja na Linuksie)
 ├── docs/api.md                     # kontrakt agent ↔ serwer
 ├── examples/                       # przykładowe JSON-y do testów curl
 └── src/
-    ├── main/java/pl/honeypot/server/
-    │   ├── Main.java               # start, routing
-    │   ├── ServerConfig.java
-    │   ├── api/                    # handlery HTTP
-    │   ├── db/                     # połączenie SQLite + repozytoria
-    │   └── model/                  # rekordy JSON
-    ├── main/resources/db/
-    │   ├── schema.sql              # schemat bazy (idempotentny, uruchamiany przy starcie)
-    │   └── seed.sql                # sensor-01 do developmentu
-    └── test/java/...
+    └── main/java/pl/honeypot/server/
+        ├── Main.java               # start, routing
+        ├── ServerConfig.java
+        ├── api/                    # handlery HTTP
+        ├── store/                  # konfiguracja czujników + zapis JSONL
+        └── model/                  # rekordy JSON
 ```
 
 ## Budowanie i uruchomienie

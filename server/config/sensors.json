@@ -1,0 +1,10 @@
+[
+  {
+    "sensor_id": "sensor-01",
+    "hostname": "honeypot-agent-stub",
+    "timeout_sec": 5,
+    "heartbeat_sec": 30,
+    "srv_port": 8000,
+    "ports": [22, 23, 80, 2222]
+  }
+]

@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.util.Properties;
 
 // Server settings loaded from a .properties file
-public record ServerConfig(String bindAddress, int port, Path dbPath, boolean seed) {
+public record ServerConfig(String bindAddress, int port, Path sensorsFile, Path dataDir) {
 
     public static ServerConfig load(Path file) throws IOException {
         Properties p = new Properties();
@@ -17,7 +17,7 @@ public record ServerConfig(String bindAddress, int port, Path dbPath, boolean se
         return new ServerConfig(
                 p.getProperty("server.bind", "0.0.0.0"),
                 Integer.parseInt(p.getProperty("server.port", "8000")),
-                Path.of(p.getProperty("db.path", "data/honeypot.db")),
-                Boolean.parseBoolean(p.getProperty("db.seed", "false")));
+                Path.of(p.getProperty("sensors.file", "config/sensors.json")),
+                Path.of(p.getProperty("data.dir", "data")));
     }
 }

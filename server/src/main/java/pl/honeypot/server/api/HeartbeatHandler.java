@@ -5,17 +5,17 @@ import io.javalin.http.Context;
 import io.javalin.http.Handler;
 import io.javalin.http.HttpStatus;
 import io.javalin.http.NotFoundResponse;
-import pl.honeypot.server.db.HeartbeatRepository;
-import pl.honeypot.server.db.SensorRepository;
+import pl.honeypot.server.store.HeartbeatStore;
+import pl.honeypot.server.store.SensorStore;
 import pl.honeypot.server.model.Heartbeat;
 
 // POST /api/v1/heartbeat - periodic "I'm alive" from the agent
 public final class HeartbeatHandler implements Handler {
 
-    private final SensorRepository sensors;
-    private final HeartbeatRepository heartbeats;
+    private final SensorStore sensors;
+    private final HeartbeatStore heartbeats;
 
-    public HeartbeatHandler(SensorRepository sensors, HeartbeatRepository heartbeats) {
+    public HeartbeatHandler(SensorStore sensors, HeartbeatStore heartbeats) {
         this.sensors = sensors;
         this.heartbeats = heartbeats;
     }

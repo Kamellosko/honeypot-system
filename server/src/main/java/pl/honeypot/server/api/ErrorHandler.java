@@ -5,18 +5,18 @@ import io.javalin.http.Context;
 import io.javalin.http.Handler;
 import io.javalin.http.HttpStatus;
 import io.javalin.http.NotFoundResponse;
-import pl.honeypot.server.db.ErrorRepository;
-import pl.honeypot.server.db.SensorRepository;
+import pl.honeypot.server.store.ErrorStore;
+import pl.honeypot.server.store.SensorStore;
 import pl.honeypot.server.model.AttackReport;
 import pl.honeypot.server.model.ErrorReport;
 
 // POST /api/v1/errors - agent reports a fault (second message type)
 public final class ErrorHandler implements Handler {
 
-    private final SensorRepository sensors;
-    private final ErrorRepository errors;
+    private final SensorStore sensors;
+    private final ErrorStore errors;
 
-    public ErrorHandler(SensorRepository sensors, ErrorRepository errors) {
+    public ErrorHandler(SensorStore sensors, ErrorStore errors) {
         this.sensors = sensors;
         this.errors = errors;
     }

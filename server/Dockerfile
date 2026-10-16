@@ -13,7 +13,10 @@ RUN dnf install -y java-21-openjdk-headless && dnf clean all \
     && mkdir -p /var/lib/honeypot-server && chown honeypot /var/lib/honeypot-server
 COPY --from=build /src/target/honeypot-server.jar /opt/honeypot-server/honeypot-server.jar
 COPY config/server.properties /etc/honeypot-server/server.properties
-RUN sed -i 's|^db.path=.*|db.path=/var/lib/honeypot-server/honeypot.db|' /etc/honeypot-server/server.properties
+COPY config/sensors.json /etc/honeypot-server/sensors.json
+RUN sed -i -e 's|^sensors.file=.*|sensors.file=/etc/honeypot-server/sensors.json|' \
+           -e 's|^data.dir=.*|data.dir=/var/lib/honeypot-server|' \
+           /etc/honeypot-server/server.properties
 USER honeypot
 EXPOSE 8000
 VOLUME /var/lib/honeypot-server

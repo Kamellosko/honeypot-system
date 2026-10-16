@@ -3,15 +3,15 @@ package pl.honeypot.server.api;
 import io.javalin.http.Context;
 import io.javalin.http.Handler;
 import io.javalin.http.NotFoundResponse;
-import pl.honeypot.server.db.SensorRepository;
+import pl.honeypot.server.store.SensorStore;
 import pl.honeypot.server.model.AgentConfig;
 
 // GET /api/v1/config/{sensorId} - agent asks for its configuration on startup
 public final class ConfigHandler implements Handler {
 
-    private final SensorRepository sensors;
+    private final SensorStore sensors;
 
-    public ConfigHandler(SensorRepository sensors) {
+    public ConfigHandler(SensorStore sensors) {
         this.sensors = sensors;
     }
 

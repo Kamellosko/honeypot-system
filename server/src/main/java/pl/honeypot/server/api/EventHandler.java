@@ -8,8 +8,8 @@ import io.javalin.http.NotFoundResponse;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
-import pl.honeypot.server.db.EventRepository;
-import pl.honeypot.server.db.SensorRepository;
+import pl.honeypot.server.store.EventStore;
+import pl.honeypot.server.store.SensorStore;
 import pl.honeypot.server.model.AttackReport;
 
 // POST /api/v1/events - agent reports a connection attempt on a decoy port
@@ -17,10 +17,10 @@ public final class EventHandler implements Handler {
 
     private static final Pattern MAC = Pattern.compile("^([0-9a-f]{2}:){5}[0-9a-f]{2}$");
 
-    private final SensorRepository sensors;
-    private final EventRepository events;
+    private final SensorStore sensors;
+    private final EventStore events;
 
-    public EventHandler(SensorRepository sensors, EventRepository events) {
+    public EventHandler(SensorStore sensors, EventStore events) {
         this.sensors = sensors;
         this.events = events;
     }
