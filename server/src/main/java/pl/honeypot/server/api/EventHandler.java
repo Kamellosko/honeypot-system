@@ -43,9 +43,6 @@ public final class EventHandler implements Handler {
         if (r.sensorId() == null || r.sensorId().isBlank()) {
             throw new BadRequestResponse("sensor_id is required");
         }
-        if (r.port() == null || r.port() < 1 || r.port() > 65535) {
-            throw new BadRequestResponse("port must be 1-65535");
-        }
         if (r.state() == null || !AttackReport.STATES.contains(r.state())) {
             throw new BadRequestResponse("state must be one of " + AttackReport.STATES);
         }
@@ -57,6 +54,6 @@ public final class EventHandler implements Handler {
                 throw new BadRequestResponse("mac must look like aa:bb:cc:dd:ee:ff");
             }
         }
-        return new AttackReport(r.sensorId(), r.port(), r.state(), mac, r.srcIp());
+        return new AttackReport(r.sensorId(), r.state(), mac, r.srcIp());
     }
 }
