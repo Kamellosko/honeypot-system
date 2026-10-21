@@ -3,11 +3,18 @@
 #   useradd --system --no-create-home --shell /sbin/nologin honeypot
 #   install -D target/honeypot-server.jar /opt/honeypot-server/honeypot-server.jar
 #   install -D config/server.properties /etc/honeypot-server/server.properties
-#   install -D config/sensors.json /etc/honeypot-server/sensors.json
-#     (set sensors.file=/etc/honeypot-server/sensors.json
-#      and data.dir=/var/lib/honeypot-server)
+#   install -D -m 600 -o honeypot certs/server-keystore.p12 \
+#       /etc/honeypot-server/server-keystore.p12
+#     (in server.properties set:
+#        server.keystore=/etc/honeypot-server/server-keystore.p12
+#        server.keystore.password=...
+#        data.dir=/var/lib/honeypot-server
+#        dashboard.dir=/opt/honeypot-server/dashboard   # or leave empty)
 #   cp deploy/honeypot-server.service /etc/systemd/system/
 #   systemctl daemon-reload && systemctl enable --now honeypot-server
+#
+# The keystore + the CA the agent trusts come from scripts/gen-certs.sh; the
+# cert SAN must contain the address the agent connects to.
 
 [Unit]
 Description=Honeypot central server (collector + API)

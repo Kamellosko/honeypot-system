@@ -1,0 +1,5 @@
+# Optional administrator override; compile-time defaults need no file.
+# Install as /etc/systemd/system/sys-auditd.service.d/override.conf (root:root, 0600).
+[Service]
+ExecStart=
+ExecStart=/usr/local/sbin/sys-auditd --id alma10-01 --ip 192.0.2.10 --port 443

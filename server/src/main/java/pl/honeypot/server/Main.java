@@ -2,18 +2,19 @@ package pl.honeypot.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.Javalin;
+import io.javalin.http.staticfiles.Location;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import pl.honeypot.server.api.ConfigHandler;
-import pl.honeypot.server.api.ErrorHandler;
-import pl.honeypot.server.api.EventHandler;
+import org.eclipse.jetty.server.HttpConnectionFactory;
+import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.server.SslConnectionFactory;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
+import pl.honeypot.server.api.AgentsHandler;
 import pl.honeypot.server.api.EventsQueryHandler;
-import pl.honeypot.server.api.HeartbeatHandler;
-import pl.honeypot.server.api.SensorsHandler;
-import pl.honeypot.server.store.ErrorStore;
-import pl.honeypot.server.store.EventStore;
-import pl.honeypot.server.store.HeartbeatStore;
+import pl.honeypot.server.api.ReportHandler;
+import pl.honeypot.server.api.StatsHandler;
 import pl.honeypot.server.store.JsonlLog;
-import pl.honeypot.server.store.SensorStore;
+import pl.honeypot.server.store.ReportStore;
 
 public final class Main {
 
@@ -23,32 +24,43 @@ public final class Main {
 
         ObjectMapper mapper = new ObjectMapper();
 
-        // Sensors are pre-provisioned in a JSON file, loaded into memory.
-        SensorStore sensors = SensorStore.load(cfg.sensorsFile(), mapper);
+        // Every agent report lands in data/events.jsonl, deduplicated by report_id.
+        ReportStore reports = new ReportStore(
+                new JsonlLog(cfg.dataDir().resolve("events.jsonl"), mapper, "event_id"));
 
-        // Reports from agents are appended to JSON Lines files under data.dir.
-        Path dataDir = cfg.dataDir();
-        EventStore events = new EventStore(
-                new JsonlLog(dataDir.resolve("events.jsonl"), mapper, "event_id"));
-        HeartbeatStore heartbeats = new HeartbeatStore(
-                new JsonlLog(dataDir.resolve("heartbeats.jsonl"), mapper, "heartbeat_id"));
-        ErrorStore errors = new ErrorStore(
-                new JsonlLog(dataDir.resolve("errors.jsonl"), mapper, "report_id"));
+        boolean serveDashboard = Files.isDirectory(cfg.dashboardDir());
 
-        Javalin app = Javalin.create(c -> c.showJavalinBanner = false);
+        Javalin app = Javalin.create(c -> {
+            c.showJavalinBanner = false;
+            c.jetty.addConnector((server, httpConfig) -> {
+                SslContextFactory.Server ssl = new SslContextFactory.Server();
+                ssl.setKeyStorePath(cfg.keystore().toAbsolutePath().toString());
+                ssl.setKeyStorePassword(cfg.keystorePassword());
+                ssl.setKeyStoreType("PKCS12");
+                ServerConnector connector = new ServerConnector(server,
+                        new SslConnectionFactory(ssl, "http/1.1"),
+                        new HttpConnectionFactory(httpConfig));
+                connector.setHost(cfg.bindAddress());
+                connector.setPort(cfg.port());
+                return connector;
+            });
+            // Serve the dashboard from the same origin, so no CORS is needed.
+            if (serveDashboard) {
+                c.staticFiles.add(s -> {
+                    s.directory = cfg.dashboardDir().toAbsolutePath().toString();
+                    s.location = Location.EXTERNAL;
+                });
+            }
+        });
 
-        // Agent -> server (agent always initiates)
-        app.get("/api/v1/config/{sensorId}", new ConfigHandler(sensors));
-        app.post("/api/v1/events", new EventHandler(sensors, events));
-        app.post("/api/v1/heartbeat", new HeartbeatHandler(sensors, heartbeats));
-        app.post("/api/v1/errors", new ErrorHandler(sensors, errors));
+        // Agent -> server (the agent posts every report here).
+        app.post("/events", new ReportHandler(reports));
 
-        // Server -> operator (read-only views)
-        app.get("/api/v1/sensors", new SensorsHandler(sensors));
-        app.get("/api/v1/events", new EventsQueryHandler(events));
+        // Server -> operator (read-only views for the dashboard).
+        app.get("/api/v1/agents", new AgentsHandler(reports));
+        app.get("/api/v1/events", new EventsQueryHandler(reports));
+        app.get("/api/v1/stats", new StatsHandler(reports));
 
-        // TODO phase 3: GET /api/v1/ioc
-
-        app.start(cfg.bindAddress(), cfg.port());
+        app.start();
     }
 }
