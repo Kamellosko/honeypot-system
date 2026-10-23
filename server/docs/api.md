@@ -1,145 +1,129 @@
 # API serwera (v1)
 
-Transport: HTTP, treść JSON (`Content-Type: application/json`). Wszystkie połączenia
-inicjuje agent. Prefiks ścieżek: `/api/v1`.
+Transport: **HTTPS** (TLS wymagany). Treść JSON (`Content-Type: application/json`).
+Agent inicjuje każde połączenie i wysyła **wszystkie** raporty na jeden endpoint
+(`POST /events`). Endpointy odczytu (`/api/v1/...`) służą dashboardowi.
 
-Sensor musi wcześniej istnieć w tabeli `sensors`. Nieznany `sensor_id` daje `404`.
+Agent weryfikuje łańcuch TLS oraz adres/host odbiornika w SAN certyfikatu i nie da
+się tego wyłączyć po stronie agenta. Certyfikat musi być zaufany przez agenta
+(`SSL_CERT_FILE` lub systemowy magazyn CA), a jego SAN musi zawierać dokładnie
+adres, pod który agent się łączy. Keystore i CA tworzy `scripts/gen-certs.sh`.
 
 ---
 
-## 1. Pobranie konfiguracji
-
-Agent wysyła to zapytanie przy starcie, zanim otworzy porty-wabiki.
+## 1. Zgłoszenie raportu (agent → serwer)
 
 ```
-GET /api/v1/config/{sensor_id}
+POST /events
 ```
 
-**200 OK**
-```json
-{
-  "sensor_id": "sensor-01",
-  "port_count": 4,
-  "timeout_sec": 5,
-  "heartbeat_sec": 30,
-  "srv_port": 8000,
-  "ports": "22,23,80,2222"
-}
-```
+Agent wysyła tu każdy typ raportu: zmianę pliku, rename, usunięcie, obserwację
+połączenia TCP, dowód z logu oraz heartbeat. Wszystkie dzielą wspólną kopertę,
+a pola specyficzne zależą od `source`/`operation`.
+
+Wspólna koperta:
 
 | Pole | Typ | Opis |
 |------|-----|------|
-| `sensor_id` | string | ID honeypota |
-| `port_count` | int | liczba portów w `ports`, przydatna do alokacji tablicy w C |
-| `timeout_sec` | int | timeout gniazda (`SO_RCVTIMEO`) |
-| `heartbeat_sec` | int | interwał heartbeatu |
-| `srv_port` | int | port serwera, na który agent wysyła raporty |
-| `ports` | string | numery portów-wabików oddzielone przecinkami, bez spacji, rosnąco |
+| `schema_version` | int | zawsze `1` |
+| `report_id` | string | 64 znaki hex (lowercase), unikalny; transmisja bywa ponawiana |
+| `agent_id` | string | identyfikator agenta |
+| `observed_at` | string | czas zdarzenia UTC, `YYYY-MM-DDTHH:MM:SSZ` |
+| `source` | string | `share` \| `log` \| `network` \| `system` |
+| `operation` | string | np. `create`, `delete`, `rename`, `downtime_change`, `tcp_connection_observed`, `observation_gap`, `heartbeat` |
+| `path` | string \| null | ścieżka; `null` + `path_base64` gdy nazwa nie jest poprawnym UTF-8 |
+| `analysis` | object | `{ "classification": ..., "actor": null }` |
+| `complete` | bool | czy raport jest kompletny |
+| `error` | string \| null | przyczyna niekompletności |
 
-**404** – nieznany sensor.
+Pola zależne od typu: `metadata` (rozmiary/uprawnienia pliku), `content_changes`
+(`old_sha256`/`new_sha256` + diff lub bloki base64), `evidence[]`,
+`connection{}` (dla `network`), `previous_path` (dla `rename`), `content` /
+`content_base64` i `network_context` (dla dowodów z logów).
+
+Przykłady: `examples/report-*.json`. Źródłem prawdy o schemacie jest kod agenta
+(`agent/src/snapshot.c`, `network.c`, `heartbeat.c`).
+
+**Odpowiedzi**
+- `201 Created` → `{"event_id": N, "report_id": "..."}` — raport zapisany.
+- `200 OK` → `{"report_id": "...", "duplicate": true}` — ten `report_id` już był
+  (ponowiona dostawa); nie zapisujemy drugi raz.
+- `400` — błędna koperta (`schema_version`, `report_id` lub `agent_id`).
+
+Serwer odpowiada 2xx **dopiero po zapisaniu** raportu (agent kasuje go z kolejki
+po 2xx; inny kod → ponawia). Każde 2xx (także dla duplikatu) zamyka pozycję w
+kolejce agenta. Serwer dokleja własne `event_id` i `received_at`.
 
 ---
 
-## 2. Zgłoszenie próby połączenia
+## 2. Lista agentów (serwer → dashboard)
 
 ```
-POST /api/v1/events
+GET /api/v1/agents
+```
+
+Agenci wykrywani są dynamicznie z napływających raportów (brak provisioningu).
+
+```json
+[
+  {
+    "agent_id": "alma10-01",
+    "status": "online",
+    "last_seen": "2026-10-18T12:52:09Z",
+    "first_seen": "2026-10-18T12:50:00Z",
+    "total_reports": 42,
+    "last_source": "share",
+    "last_operation": "create",
+    "last_classification": "file_change"
+  }
+]
+```
+
+`status` to `online`, gdy ostatni raport dotarł w ciągu 90 s, inaczej `offline`.
+
+---
+
+## 3. Dziennik zdarzeń (serwer → dashboard)
+
+```
+GET /api/v1/events
+```
+
+Zwraca zapisane raporty, najnowsze pierwsze. Parametry (opcjonalne):
+
+| Parametr | Opis |
+|----------|------|
+| `agent_id` | filtr po agencie |
+| `source` | filtr po `source` (`share`/`log`/`network`/`system`) |
+| `limit` | ogranicza do N najnowszych (≥ 1) |
+
+Każdy element to pełny raport agenta wzbogacony o `event_id` i `received_at`.
+
+---
+
+## 4. Statystyki (serwer → dashboard)
+
+```
+GET /api/v1/stats
 ```
 
 ```json
 {
-  "sensor_id": "sensor-01",
-  "state": "handling_conn",
-  "mac": "02:42:ac:12:00:05",
-  "src_ip": "172.18.0.5"
+  "total_events": 42,
+  "total_agents": 1,
+  "online_agents": 1,
+  "by_source": { "share": 30, "network": 8, "system": 4 },
+  "by_classification": { "file_change": 25, "tcp_connection": 8 },
+  "by_operation": { "create": 20, "heartbeat": 4 }
 }
 ```
-
-| Pole | Typ | Wymagane | Opis |
-|------|-----|:--------:|------|
-| `sensor_id` | string | tak | ID honeypota |
-| `state` | string | tak | stan agenta: `init`, `idle`, `handling_conn`, `shutdown`, `error` |
-| `mac` | string \| null | nie | MAC atakującego, `aa:bb:cc:dd:ee:ff` (wielkość liter dowolna) |
-| `src_ip` | string \| null | nie (zalecane) | IP atakującego |
-
-**201 Created** → `{"event_id": 42}`
-**400** – błędne pole. **404** – nieznany sensor.
-
-Serwer sam nadaje czas odbioru (`received_at`).
-
----
-
-## 3. Heartbeat
-
-Agent wysyła go co `heartbeat_sec` sekund (z konfiguracji).
-
-```
-POST /api/v1/heartbeat
-```
-
-```json
-{
-  "sensor_id": "sensor-01",
-  "events_since_last": 0,
-  "uptime_sec": 86400
-}
-```
-
-| Pole | Typ | Wymagane | Opis |
-|------|-----|:--------:|------|
-| `sensor_id` | string | tak | ID honeypota |
-| `events_since_last` | int | tak | liczba zdarzeń od poprzedniego heartbeatu (≥ 0) |
-| `uptime_sec` | int | tak | czas działania agenta w sekundach (≥ 0) |
-
-**204 No Content**, bez treści.
-**400** – błędne pole. **404** – nieznany sensor.
-
-Serwer zapisuje wiersz w `heartbeats` i odświeża `sensors.last_seen` oraz `status = online`.
-
----
-
-## 4. Raport błędu
-
-Drugi typ wiadomości od agenta — zgłoszenie usterki (odpowiada stanowi `STATE_ERROR`).
-
-```
-POST /api/v1/errors
-```
-
-```json
-{
-  "sensor_id": "sensor-01",
-  "state": "error",
-  "error_id": 2
-}
-```
-
-| Pole | Typ | Wymagane | Opis |
-|------|-----|:--------:|------|
-| `sensor_id` | string | tak | ID honeypota |
-| `state` | string | tak | stan agenta w chwili błędu (ten sam zbiór co w zdarzeniu) |
-| `error_id` | int | tak | kod błędu nadawany przez agenta (katalog do ustalenia z osobą A) |
-
-**201 Created** → `{"report_id": 7}`
-**400** – błędne pole. **404** – nieznany sensor.
-
----
-
-## Planowane (kolejne fazy)
-
-| Endpoint | Faza | Opis |
-|----------|------|------|
-| `GET /api/v1/sensors` | 1 | dla dashboardu: lista sensorów, `status`, `last_seen` |
-| `GET /api/v1/events` | 1 | dla dashboardu: oś czasu zdarzeń |
-| `GET /api/v1/ioc` | 3 | lista blokad dla agenta |
 
 ---
 
 ## Uwagi
 
-- **MAC przechodzi tylko w obrębie jednej sieci L2.** Gdy atakujący jest za routerem, czyli
-  w każdym ataku z internetu, agent zobaczy MAC routera lub bramy, a nie atakującego. Dlatego
-  `mac` jest opcjonalne, a `src_ip` zalecane. W labie dockerowym (jedna sieć bridge) MAC będzie
-  prawdziwy. Agent może go odczytać z `/proc/net/arp` po IP z `getpeername()`.
-- `GET /config` zastępuje `POST /register` z `projekt_honeypot.md`. Pobranie konfiguracji
-  oznacza sensor jako `online`.
+- **MAC przechodzi tylko w obrębie jednej sieci L2.** Dla atakującego zza routera
+  agent zobaczy MAC bramy lub nic; w raportach połączeń `peer.mac` bywa `null`
+  z `mac_status` wyjaśniającym powód. `src_ip`/`peer.ip` jest wiarygodniejsze.
+- Raporty mogą zawierać treść plików i logów — zabezpiecz serwer i `data/`.
+- Deduplikacja po `report_id` jest po stronie serwera; agent może słać duplikaty.

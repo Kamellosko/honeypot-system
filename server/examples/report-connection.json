@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "report_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "agent_id": "alma10-01",
+  "observed_at": "2026-10-18T12:01:00Z",
+  "source": "network",
+  "operation": "tcp_connection_observed",
+  "path": "",
+  "analysis": { "classification": "tcp_connection", "actor": null },
+  "evidence": [],
+  "content_changes": null,
+  "connection": {
+    "protocol": "tcp",
+    "state": "ESTABLISHED",
+    "direction": "inbound_listener_match",
+    "observation_method": "inet_diag_poll",
+    "local_ip": "10.0.0.2",
+    "local_port": 445,
+    "peer_port": 51000,
+    "peer": {
+      "ip": "192.0.2.50",
+      "mac": "02:42:ac:11:00:05",
+      "interface": "eth0",
+      "mac_status": "resolved",
+      "mac_source": "local_arp_cache_at_report_time",
+      "context_only": true
+    }
+  },
+  "complete": true,
+  "error": null
+}

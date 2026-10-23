@@ -1,56 +1,92 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pl">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Honeypot SOC Dashboard</title>
+  <title>Monitor serwera plików</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
   <header>
     <div>
-      <h1>HONEYPOT SOC DASHBOARD</h1>
-      <p style="color: #64748b; font-size: 0.8rem; margin-top: 4px;">
-        Rozproszony system detekcji i tarpit | Faza 0 (Szkielet statyczny)
-      </p>
+      <h1>MONITOR SERWERA PLIKÓW</h1>
+      <p class="subtitle">Zdarzenia na udziałach i w logach</p>
     </div>
-    <span class="badge">Status: Faza 0 (Szkielet)</span>
+    <div class="header-status">
+      <span id="conn-badge" class="badge badge-unknown">Łączenie…</span>
+      <span id="updated" class="updated"></span>
+    </div>
   </header>
 
-  <section class="box">
-    <h3>Stan czujników (Liveness)</h3>
-    <p>
-      Sensor: <strong>sensor-01</strong> | 
-      Status: <span class="status-online">ONLINE</span> | 
-      Port wabika: <strong>2222 TCP</strong> | 
-      Heartbeat: <strong>30s</strong>
-    </p>
+  <section class="tiles" id="tiles">
+    <div class="tile"><div class="tile-value" id="stat-agents-online">–</div><div class="tile-label">Agenci online</div></div>
+    <div class="tile"><div class="tile-value" id="stat-agents-total">–</div><div class="tile-label">Agenci łącznie</div></div>
+    <div class="tile"><div class="tile-value" id="stat-events">–</div><div class="tile-label">Zdarzenia (łącznie)</div></div>
+    <div class="tile"><div class="tile-value" id="stat-sources">–</div><div class="tile-label">Źródła raportów</div></div>
   </section>
 
   <section class="box">
-    <h3>Dziennik zdarzeń (Przykładowy format)</h3>
+    <h3>Stan czujników (Liveness)</h3>
+    <div id="agents" class="agents-grid">
+      <p class="muted">Ładowanie…</p>
+    </div>
+  </section>
+
+  <section class="box">
+    <div class="box-head">
+      <h3>Dziennik zdarzeń</h3>
+      <div class="controls">
+        <label>Źródło
+          <select id="filter-source">
+            <option value="">wszystkie</option>
+            <option value="share">share</option>
+            <option value="log">log</option>
+            <option value="network">network</option>
+            <option value="system">system</option>
+          </select>
+        </label>
+        <label>Agent
+          <select id="filter-agent"><option value="">wszyscy</option></select>
+        </label>
+        <label>Limit
+          <select id="filter-limit">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="250">250</option>
+            <option value="1000">1000</option>
+          </select>
+        </label>
+        <label class="auto"><input type="checkbox" id="auto" checked> Auto-odświeżanie</label>
+        <button id="refresh" type="button">Odśwież</button>
+      </div>
+    </div>
     <table>
       <thead>
         <tr>
           <th>Znacznik czasu</th>
-          <th>Sensor ID</th>
-          <th>IP Źródłowe</th>
-          <th>Typ zdarzenia</th>
-          <th>Port docelowy</th>
+          <th>Agent</th>
+          <th>Źródło</th>
+          <th>Operacja</th>
+          <th>Klasyfikacja</th>
+          <th>Szczegóły</th>
+          <th>Stan</th>
         </tr>
       </thead>
-      <tbody>
-        <tr>
-          <td>2026-10-06T12:00:00Z</td>
-          <td>sensor-01</td>
-          <td>192.168.1.105</td>
-          <td>raw_connection</td>
-          <td>2222</td>
-        </tr>
+      <tbody id="events">
+        <tr><td colspan="7" class="muted">Ładowanie…</td></tr>
       </tbody>
     </table>
   </section>
 
+  <div id="drawer" class="drawer hidden">
+    <div class="drawer-head">
+      <span id="drawer-title">Raport</span>
+      <button id="drawer-close" type="button">✕</button>
+    </div>
+    <pre id="drawer-body"></pre>
+  </div>
+
+  <script src="app.js"></script>
 </body>
 </html>

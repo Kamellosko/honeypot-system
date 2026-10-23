@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "report_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "agent_id": "alma10-01",
+  "observed_at": "2026-10-18T12:02:00Z",
+  "source": "system",
+  "operation": "heartbeat",
+  "path": "",
+  "metadata": {},
+  "analysis": { "classification": "unknown" },
+  "evidence": [],
+  "content_changes": null,
+  "complete": true,
+  "error": null
+}
