@@ -73,6 +73,9 @@ int main(void) {
   const unsigned char ports[] = "client=192.0.2.8:445 mapped=::ffff:192.0.2.8 junk=192.0.2.7:99999 bad=192.0.2.4oops";
   hp_extract_ips(ports, sizeof(ports) - 1, &context);
   assert(context.count == 1 && !strcmp(context.ips[0], "192.0.2.8"));
+  const unsigned char samba[] = "status [NT_STATUS_WRONG_PASSWORD] remote host [ipv4:192.0.2.8:49282]. local host [ipv4:192.0.2.1:445]";
+  hp_extract_ips(samba, sizeof(samba) - 1, &context);
+  assert(context.count == 2 && !strcmp(context.ips[0], "192.0.2.8") && !strcmp(context.ips[1], "192.0.2.1"));
   const unsigned char binary[] = {'x', 0, '1','9','2','.','0','.','2','.','8',' ', 0xff};
   hp_extract_ips(binary, sizeof(binary), &context);
   assert(context.count == 1);

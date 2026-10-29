@@ -381,8 +381,14 @@ int hp_report_simple(struct hp_store *s, const char *source, const char *operati
   if (!out) return -1;
   const char *classification = "unknown";
   if (content && (memmem(content, content_size, "Failed password", 15) ||
-                  memmem(content, content_size, "NT_STATUS_LOGON_FAILURE", 23)))
+                  memmem(content, content_size, "NT_STATUS_LOGON_FAILURE", 23) ||
+                  memmem(content, content_size, "NT_STATUS_WRONG_PASSWORD", 24) ||
+                  memmem(content, content_size, "NT_STATUS_NO_SUCH_USER", 22)))
     classification = "authentication_failure";
+  else if (content && (memmem(content, content_size, "status [NT_STATUS_OK]", 21) ||
+                       memmem(content, content_size, "Accepted password", 17) ||
+                       memmem(content, content_size, "Accepted publickey", 18)))
+    classification = "authentication_success";
   else if (content && memmem(content, content_size, "smbd_audit:", 11))
     classification = "samba_audit";
   fprintf(out, ",\"metadata\":{},\"analysis\":{\"classification\":\"%s\"}", classification);

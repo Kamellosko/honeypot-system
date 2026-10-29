@@ -26,22 +26,24 @@ void hp_extract_ips(const unsigned char *content, size_t size, struct hp_network
     char token[128], ip[INET6_ADDRSTRLEN];
     if (length >= sizeof(token)) continue;
     memcpy(token, content + start, length); token[length] = 0;
+    char *addr = token;
+    if (!strncmp(addr, "ipv4:", 5)) addr += 5;   // format Samby: [ipv4:A.B.C.D:port]
     struct in6_addr v6;
     struct in_addr v4;
     int family = 0;
-    if (inet_pton(AF_INET, token, &v4) == 1) family = AF_INET;
-    else if (inet_pton(AF_INET6, token, &v6) == 1) {
+    if (inet_pton(AF_INET, addr, &v4) == 1) family = AF_INET;
+    else if (inet_pton(AF_INET6, addr, &v6) == 1) {
       family = AF_INET6;
       if (IN6_IS_ADDR_V4MAPPED(&v6)) { memcpy(&v4, &v6.s6_addr[12], sizeof(v4)); family = AF_INET; }
     } else {
-      char *colon = strchr(token, ':');
-      if (colon && colon == strrchr(token, ':') && colon[1]) {
+      char *colon = strchr(addr, ':');
+      if (colon && colon == strrchr(addr, ':') && colon[1]) {
         char *end;
         errno = 0;
         unsigned long port = strtoul(colon + 1, &end, 10);
         if (!errno && !*end && port > 0 && port <= 65535) {
           *colon = 0;
-          if (inet_pton(AF_INET, token, &v4) == 1) family = AF_INET;
+          if (inet_pton(AF_INET, addr, &v4) == 1) family = AF_INET;
         }
       }
     }
