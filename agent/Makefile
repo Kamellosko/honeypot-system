@@ -5,7 +5,10 @@ INSTALL_BINARY ?= build/release/honeypot
 .DELETE_ON_ERROR:
 CFLAGS ?= -O2 -g
 CFLAGS += -std=c11 -Wall -Wextra -Werror
-HARDEN_CFLAGS = -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fPIE -fvisibility=hidden
+# GCC 11 (AlmaLinux 9) supports _FORTIFY_SOURCE up to 2 and -Werror turns level 3 into an error.
+# On a newer toolchain (AlmaLinux 10, gcc-toolset-14) build with FORTIFY_LEVEL=3.
+FORTIFY_LEVEL ?= 2
+HARDEN_CFLAGS = -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=$(FORTIFY_LEVEL) -fstack-protector-strong -fPIE -fvisibility=hidden
 HARDEN_LDFLAGS = -pie -Wl,-z,relro,-z,now,-z,noexecstack -Wl,--build-id=sha1
 INCLUDES = -Iinclude -Ithird_party/cJSON
 LDLIBS += -lcurl -lcrypto -ltdb -lpthread -lm
