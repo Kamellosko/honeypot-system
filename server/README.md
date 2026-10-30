@@ -13,7 +13,7 @@ wcześniej rejestrować.
 
 - JDK 21, Maven, `openssl` (do certyfikatów).
 
-## Uruchomienie lokalne (bez Dockera)
+## Uruchomienie lokalne
 
 ```sh
 cd server

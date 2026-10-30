@@ -266,7 +266,7 @@ dobudowywane na stabilnym rdzeniu. **Dwie integracje** zamiast jednej na końcu.
   „API contract", nieruszalny bez zgody trójki).
 - **A (8 h):** szkielet agenta w C — port-wabik, log trafień na stdout.
 - **B (8 h):** szkielet kolektora — `POST /events`, zapis do bazy (SQLite), schemat bazy.
-- **C (8 h):** szkielet dashboardu na sztucznych danych + pierwszy `docker-compose`.
+- **C (8 h):** szkielet dashboardu na sztucznych danych.
 
 ### Faza 1 — Warstwy bazowe na atrapach (Tydz. 3–5, 36 h)
 - **A (12 h):** detekcja skanu (N/T), serializacja JSON, realna wysyłka, heartbeat co 30 s.

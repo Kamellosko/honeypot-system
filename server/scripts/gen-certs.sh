@@ -10,7 +10,7 @@
 #   scripts/gen-certs.sh [SAN ...]
 #
 # Each SAN is "IP:1.2.3.4" or "DNS:host.example". With no arguments it defaults
-# to IP:127.0.0.1 (local, no-Docker testing, matches the agent's default
+# to IP:127.0.0.1 (local testing, matches the agent's default
 # DEST_IP). Pass the real address when the agent runs on another host, e.g.:
 #   scripts/gen-certs.sh IP:192.0.2.10
 #   scripts/gen-certs.sh IP:127.0.0.1 DNS:collector.lab

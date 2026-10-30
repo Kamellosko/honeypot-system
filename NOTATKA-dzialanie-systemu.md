@@ -75,7 +75,7 @@ maszyny — to jedyna kopia poza H.
 Źródło: `agent/src/main.c`.
 
 ### 3.1 Uruchomienie
-- Argumenty: `--id`, `--ip`, `--port` (każdy najwyżej raz; walidacja: ID 1–128 znaków ASCII drukowalnych, IP przez `inet_pton`, port 1–65535).
+- Argumenty: `--id`, `--ip`, `--port` (każdy najwyżej raz; walidacja: ID 1–64 znaków ASCII drukowalnych, IP przez `inet_pton`, port 1–65535).
 - `umask 0077`, stdout/stderr → `/dev/null`, nazwa procesu zmieniona na `sys-auditd` (`prctl(PR_SET_NAME)` + nadpisanie `argv[0]`).
 - Stan w `/var/lib/sys-auditd` (0700, root): `snapshots/` i `pending/`. Ścieżki otwierane przez `openat2` z
   `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`, więc symlink w udziale nie przekieruje agenta poza udział.
@@ -402,8 +402,8 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
    Projekt (`projekt_honeypot.md`) przewiduje token / mTLS, ale nie jest to zaimplementowane.
 7. **Skalowanie serwera**: każde zapytanie `GET /api/v1/events` czyta i parsuje **cały** `events.jsonl`; dashboard robi to co 4 s.
    Przy dużym ruchu logów (jedna linia = jeden raport) plik szybko rośnie. Zbiór `report_id` też rośnie w pamięci bez limitu.
-8. **Niezgodność walidacji ID**: agent dopuszcza `--id` do 128 znaków ASCII, serwer tylko `[A-Za-z0-9._-]{1,64}`. Inny ID → 400 → wszystkie raporty
-   lądują jako `.rejected`. Domyślne `fs01`/`alma10-01` są poprawne.
+8. **Walidacja ID**: agent dopuszcza `--id` do 64 znaków ASCII drukowalnych, serwer tylko `[A-Za-z0-9._-]{1,64}`. ID z innymi znakami → 400 → wszystkie raporty
+   lądują jako `.rejected` (od tej wersji nie liczą się już do limitu kolejki). Domyślne `fs01`/`alma10-01` są poprawne.
 9. **Wydajność wysyłki**: nowy handshake TLS na każdy raport, kolejność `readdir`. Przy zalewie linii logu kolejka może narastać do limitu 10 000.
    Dodatkowo `hp_store_pending_count` liczy pliki zawierające `.json` w nazwie — także `*.json.rejected` i pliki tymczasowe — a `.rejected`
    nigdy nie są czyszczone, więc potrafią w końcu zająć limit kolejki.
