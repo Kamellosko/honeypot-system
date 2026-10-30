@@ -6,10 +6,15 @@
 const API_BASE = "";
 
 const REFRESH_MS = 4000;
+const HIGHLIGHT_MAX = 200000;   // bigger reports are shown as plain text
 
 const el = (id) => document.getElementById(id);
 let timer = null;
 let reportsById = new Map();
+let lastSignature = "";
+let lastOk = "";
+let currentJson = "";
+let drawerOpener = null;
 
 function esc(s) {
   return String(s == null ? "" : s)
@@ -45,13 +50,23 @@ function fmtTime(iso) {
   return new Date(t).toLocaleString("pl-PL", { hour12: false });
 }
 
-function classificationClass(c) {
+function clock(iso) {
+  const t = Date.parse(iso);
+  return isNaN(t) ? esc(iso) : new Date(t).toLocaleTimeString("pl-PL", { hour12: false });
+}
+
+function dayOf(iso) {
+  const t = Date.parse(iso);
+  return isNaN(t) ? "" : new Date(t).toLocaleDateString("pl-PL", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function classTone(c) {
   const danger = ["authentication_failure", "file_change", "rename", "delete",
     "delete_during_downtime", "downtime_change"];
   const warn = ["tcp_connection", "samba_audit", "observation_gap", "authentication_success"];
-  if (danger.includes(c)) return "cls-danger";
-  if (warn.includes(c)) return "cls-warn";
-  return "cls-info";
+  if (danger.includes(c)) return "danger";
+  if (warn.includes(c)) return "warn";
+  return "info";
 }
 
 // A short, human summary of a report, tailored to its source/operation.
@@ -96,35 +111,50 @@ function summarize(r) {
 }
 
 function stateCell(r) {
-  if (r.error) return `<span class="bad" title="${esc(r.error)}">✗ ${esc(r.error)}</span>`;
-  if (r.complete === false) return `<span class="bad">✗ niekompletny</span>`;
-  return `<span class="ok">✓</span>`;
+  if (r.error) return `<span class="bad" title="${esc(r.error)}">! ${esc(r.error)}</span>`;
+  if (r.complete === false) return `<span class="bad">! niekompletny</span>`;
+  return `<span class="ok">ok</span>`;
+}
+
+// Text used by the search box: the fields an analyst usually looks for.
+function haystack(r) {
+  const parts = [r.agent_id, r.source, r.operation, r.path,
+    r.analysis && r.analysis.classification,
+    typeof r.content === "string" ? r.content.slice(0, 600) : ""];
+  const peer = r.connection && r.connection.peer;
+  if (peer) parts.push(peer.ip, peer.mac);
+  const eps = r.network_context && r.network_context.endpoints;
+  if (Array.isArray(eps)) eps.forEach((e) => parts.push(e.ip, e.mac));
+  return parts.filter(Boolean).join(" ").toLowerCase();
 }
 
 function renderStats(s) {
   el("stat-agents-online").textContent = s.online_agents;
   el("stat-agents-total").textContent = s.total_agents;
   el("stat-events").textContent = s.total_events;
-  const sources = s.by_source ? Object.keys(s.by_source).length : 0;
-  el("stat-sources").textContent = sources;
+  el("stat-sources").textContent = s.by_source ? Object.keys(s.by_source).length : 0;
+  const classes = Object.entries(s.by_classification || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  el("stat-classes").innerHTML = classes
+    .map(([name, n]) => `<span class="c-${classTone(name)}">${esc(name)} ${esc(n)}</span>`).join("");
 }
 
 function renderAgents(agents) {
-  const box = el("agents");
+  const body = el("agents");
   if (!agents.length) {
-    box.innerHTML = "<p class='muted'>Brak agentów — żaden raport jeszcze nie dotarł.</p>";
+    body.innerHTML = "<tr><td colspan='5' class='empty'>Brak agentów: żaden raport jeszcze nie dotarł.</td></tr>";
   } else {
-    box.innerHTML = agents.map((a) => `
-      <div class="agent-card ${a.status === "online" ? "online" : "offline"}">
-        <div class="agent-id">${esc(a.agent_id)}</div>
-        <div class="agent-meta">
-          Status: <span class="status-${esc(a.status)}">${a.status === "online" ? "ONLINE" : "OFFLINE"}</span><br>
-          Ostatni raport: <b>${relTime(a.last_seen)}</b> <span class="sub">(${fmtTime(a.last_seen)})</span><br>
-          Raporty: <b>${esc(a.total_reports)}</b><br>
-          Ostatnio: <b>${esc(a.last_operation || "—")}</b> / ${esc(a.last_source || "—")}
-          ${a.last_classification ? `<br>Klasyfikacja: <b>${esc(a.last_classification)}</b>` : ""}
-        </div>
-      </div>`).join("");
+    body.innerHTML = agents.map((a) => {
+      const up = a.status === "online";
+      const last = [a.last_operation, a.last_source && "(" + a.last_source + ")", a.last_classification]
+        .filter(Boolean).map(esc).join(" ");
+      return `<tr>
+        <td>${esc(a.agent_id)}</td>
+        <td class="${up ? "online" : "offline"}">${up ? "● online" : "○ offline"}</td>
+        <td>${relTime(a.last_seen)} <span class="sub">${fmtTime(a.last_seen)}</span></td>
+        <td>${esc(a.total_reports)}</td>
+        <td>${last || "—"}</td>
+      </tr>`;
+    }).join("");
   }
 
   // Keep the agent filter in sync with discovered agents.
@@ -140,63 +170,127 @@ function renderAgents(agents) {
   }
 }
 
-function renderEvents(events) {
+function renderEvents(events, fetched) {
+  const total = fetched.length;
+  el("shown-count").textContent = events.length < total
+    ? `${events.length} z ${total} pobranych`
+    : `${total} zdarzeń`;
+
+  // Same rows as last time: leave the table alone so selection and focus survive.
+  const signature = events.map((r) => r.report_id).join(",");
+  if (signature === lastSignature) return;
+  lastSignature = signature;
+
+  const focused = document.activeElement && document.activeElement.dataset
+    ? document.activeElement.dataset.id : null;
+
   reportsById = new Map();
   const tbody = el("events");
   if (!events.length) {
-    tbody.innerHTML = "<tr><td colspan='7' class='muted'>Brak zdarzeń dla wybranych filtrów.</td></tr>";
+    tbody.innerHTML = total
+      ? `<tr><td colspan='7' class='empty'>Wszystkie pobrane zdarzenia (${total}) są ukryte przez filtry.</td></tr>`
+      : "<tr><td colspan='7' class='empty'>Brak zdarzeń dla wybranych filtrów.</td></tr>";
     return;
   }
-  tbody.innerHTML = events.map((r) => {
+
+  let day = null;
+  const rows = [];
+  for (const r of events) {
     reportsById.set(r.report_id, r);
-    const cls = r.analysis ? r.analysis.classification : null;
     const when = r.observed_at || r.received_at;
-    return `<tr class="clickable" data-id="${esc(r.report_id)}">
-      <td title="${esc(when)}">${fmtTime(when)}</td>
+    const d = dayOf(when);
+    if (d !== day) {
+      day = d;
+      rows.push(`<tr class="day"><td colspan="7">${esc(d)}</td></tr>`);
+    }
+    const cls = r.analysis ? r.analysis.classification : null;
+    const tone = classTone(cls);
+    const mark = tone === "danger" ? "! " : tone === "warn" ? "~ " : "";
+    rows.push(`<tr class="clickable row-${tone}" tabindex="0" data-id="${esc(r.report_id)}">
+      <td class="time" title="${esc(when)}">${clock(when)}</td>
       <td>${esc(r.agent_id)}</td>
-      <td><span class="tag src-${esc(r.source)}">${esc(r.source)}</span></td>
+      <td class="src-${esc(r.source)}">${esc(r.source)}</td>
       <td>${esc(r.operation)}</td>
-      <td class="${classificationClass(cls)}">${esc(cls || "—")}</td>
+      <td class="c-${tone}">${mark}${esc(cls || "—")}</td>
       <td class="details">${summarize(r)}</td>
       <td>${stateCell(r)}</td>
-    </tr>`;
-  }).join("");
+    </tr>`);
+  }
+  tbody.innerHTML = rows.join("");
 
-  tbody.querySelectorAll("tr.clickable").forEach((tr) => {
-    tr.addEventListener("click", () => openDrawer(tr.getAttribute("data-id")));
-  });
+  if (focused) {
+    const again = tbody.querySelector(`tr[data-id="${CSS.escape(focused)}"]`);
+    if (again) again.focus();
+  }
+}
+
+// Colours the keys, strings, numbers and literals of an already formatted JSON text.
+// Every piece goes through esc(), so report content can't inject markup.
+function highlightJson(text) {
+  if (text.length > HIGHLIGHT_MAX) return esc(text);
+  const re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+  let out = "";
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    out += esc(text.slice(last, m.index));
+    if (m[1]) {
+      out += `<span class="${m[2] ? "j-k" : "j-s"}">${esc(m[1])}</span>${esc(m[2] || "")}`;
+    } else {
+      out += `<span class="${m[3] ? "j-b" : "j-n"}">${esc(m[0])}</span>`;
+    }
+    last = re.lastIndex;
+  }
+  return out + esc(text.slice(last));
 }
 
 function openDrawer(id) {
   const r = reportsById.get(id);
   if (!r) return;
+  drawerOpener = document.activeElement;
+  currentJson = JSON.stringify(r, null, 2);
   el("drawer-title").textContent = `${r.source} / ${r.operation}`;
-  el("drawer-body").textContent = JSON.stringify(r, null, 2);
+  el("drawer-body").innerHTML = highlightJson(currentJson);
   el("drawer").classList.remove("hidden");
+  el("drawer-close").focus();
 }
 
 function closeDrawer() {
+  if (el("drawer").classList.contains("hidden")) return;
   el("drawer").classList.add("hidden");
+  if (drawerOpener && document.contains(drawerOpener)) drawerOpener.focus();
+  drawerOpener = null;
 }
 
-function setConn(ok, msg) {
-  const b = el("conn-badge");
-  b.className = "badge " + (ok ? "badge-ok" : "badge-error");
-  b.textContent = msg;
+function copyJson() {
+  const b = el("copy-json");
+  navigator.clipboard.writeText(currentJson).then(
+    () => { b.textContent = "skopiowano"; },
+    () => { b.textContent = "nie udało się"; });
+  setTimeout(() => { b.textContent = "kopiuj"; }, 1500);
+}
+
+function setConn(ok) {
+  const c = el("conn");
+  c.className = ok ? "conn-ok" : "conn-err";
+  c.textContent = ok ? "● połączono" : "○ brak połączenia z serwerem";
 }
 
 let busy = false;
+let pending = false;
 
 async function refresh() {
-  if (busy) return;   // a slow server must not pile up requests
+  if (busy) { pending = true; return; }   // a slow server must not pile up requests
   busy = true;
   const source = el("filter-source").value;
   const agent = el("filter-agent").value;
   const limit = Number(el("filter-limit").value) || 100;
   const hideUnknown = el("hide-unknown").checked;
   const hideHeartbeat = el("hide-heartbeat").checked;
-  // Przy ukrywaniu wierszy pobieramy więcej, żeby po odfiltrowaniu została pełna lista.
-  const fetchLimit = (hideUnknown || hideHeartbeat) ? Math.min(limit * 5, 1000) : limit;
+  const text = el("filter-text").value.trim().toLowerCase();
+  const filtering = hideUnknown || hideHeartbeat || text;
+  // Przy filtrowaniu pobieramy więcej, żeby po odfiltrowaniu została pełna lista.
+  const fetchLimit = filtering ? Math.min(limit * 5, 1000) : limit;
   const query = new URLSearchParams();
   if (source) query.set("source", source);
   if (agent) query.set("agent_id", agent);
@@ -212,23 +306,25 @@ async function refresh() {
     renderStats(stats);
     renderAgents(agents);
     let shown = events;
-    if (hideUnknown || hideHeartbeat) {
+    if (filtering) {
       shown = events.filter((r) => {
         if (r.error || r.complete === false) return true;   // luki w obserwacji zawsze widoczne
         const c = r.analysis && r.analysis.classification;
         if (hideHeartbeat && c === "heartbeat") return false;
         if (hideUnknown && (!c || c === "unknown")) return false;
-        return true;
+        return !text || haystack(r).includes(text);
       }).slice(0, limit);
     }
-    renderEvents(shown);
-    setConn(true, "Połączono");
-    el("updated").textContent = "Aktualizacja: " + new Date().toLocaleTimeString("pl-PL", { hour12: false });
+    renderEvents(shown, events);
+    setConn(true);
+    lastOk = new Date().toLocaleTimeString("pl-PL", { hour12: false });
+    el("updated").textContent = "zaktualizowano " + lastOk;
   } catch (e) {
-    setConn(false, "Brak połączenia z serwerem");
-    el("updated").textContent = String(e.message || e);
+    setConn(false);
+    el("updated").textContent = (lastOk ? "ostatnie dane z " + lastOk + ", " : "") + String(e.message || e);
   } finally {
     busy = false;
+    if (pending) { pending = false; refresh(); }
   }
 }
 
@@ -237,14 +333,25 @@ function scheduleAuto() {
   if (el("auto").checked) timer = setInterval(refresh, REFRESH_MS);
 }
 
-el("refresh").addEventListener("click", refresh);
-el("filter-source").addEventListener("change", refresh);
-el("filter-agent").addEventListener("change", refresh);
-el("filter-limit").addEventListener("change", refresh);
-el("hide-unknown").addEventListener("change", refresh);
-el("hide-heartbeat").addEventListener("change", refresh);
+function force() { lastSignature = ""; refresh(); }
+
+el("refresh").addEventListener("click", force);
+["filter-source", "filter-agent", "filter-limit", "hide-unknown", "hide-heartbeat"]
+  .forEach((id) => el(id).addEventListener("change", force));
+let typing = null;
+el("filter-text").addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(force, 250); });
 el("auto").addEventListener("change", scheduleAuto);
+
+el("events").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr.clickable");
+  if (tr) openDrawer(tr.dataset.id);
+});
+el("events").addEventListener("keydown", (e) => {
+  const tr = e.target.closest("tr.clickable");
+  if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openDrawer(tr.dataset.id); }
+});
 el("drawer-close").addEventListener("click", closeDrawer);
+el("copy-json").addEventListener("click", copyJson);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
 refresh();

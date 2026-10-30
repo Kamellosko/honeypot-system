@@ -4,52 +4,65 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Monitor serwera plików</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23282828'/%3E%3Cpath d='M3 4l5 4-5 4M9 12h4' stroke='%23fabd2f' stroke-width='1.6' fill='none'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
   <header>
-    <div>
-      <h1>MONITOR SERWERA PLIKÓW</h1>
-      <p class="subtitle">Zdarzenia na udziałach i w logach</p>
-    </div>
+    <h1>Monitor serwera plików<span class="subtitle">zdarzenia na udziałach i w logach</span></h1>
     <div class="header-status">
-      <span id="conn-badge" class="badge badge-unknown">Łączenie…</span>
-      <span id="updated" class="updated"></span>
+      <span id="conn" class="conn-wait">łączenie…</span>
+      <span id="updated"></span>
     </div>
   </header>
 
-  <section class="tiles" id="tiles">
-    <div class="tile"><div class="tile-value" id="stat-agents-online">–</div><div class="tile-label">Agenci online</div></div>
-    <div class="tile"><div class="tile-value" id="stat-agents-total">–</div><div class="tile-label">Agenci łącznie</div></div>
-    <div class="tile"><div class="tile-value" id="stat-events">–</div><div class="tile-label">Zdarzenia (łącznie)</div></div>
-    <div class="tile"><div class="tile-value" id="stat-sources">–</div><div class="tile-label">Źródła raportów</div></div>
-  </section>
+  <div class="statusline">
+    <span>agenci online <b id="stat-agents-online">–</b>/<b id="stat-agents-total">–</b></span>
+    <span>zdarzenia <b id="stat-events">–</b></span>
+    <span>źródła <b id="stat-sources">–</b></span>
+    <span class="classes" id="stat-classes"></span>
+  </div>
 
-  <section class="box">
-    <h3>Stan czujników (Liveness)</h3>
-    <div id="agents" class="agents-grid">
-      <p class="muted">Ładowanie…</p>
-    </div>
-  </section>
+  <main>
+    <section>
+      <h2>agenci</h2>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>agent</th>
+              <th>stan</th>
+              <th>ostatni raport</th>
+              <th>raportów</th>
+              <th>ostatnio</th>
+            </tr>
+          </thead>
+          <tbody id="agents">
+            <tr><td colspan="5" class="empty">ładowanie…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
-  <section class="box">
-    <div class="box-head">
-      <h3>Dziennik zdarzeń</h3>
+    <section>
+      <h2>dziennik zdarzeń</h2>
       <div class="controls">
-        <label>Źródło
+        <label>źródło
           <select id="filter-source">
             <option value="">wszystkie</option>
             <option value="share">share</option>
             <option value="log">log</option>
             <option value="network">network</option>
             <option value="system">system</option>
+            <option value="monitor">monitor</option>
+            <option value="source">source</option>
           </select>
         </label>
-        <label>Agent
+        <label>agent
           <select id="filter-agent"><option value="">wszyscy</option></select>
         </label>
-        <label>Limit
+        <label>limit
           <select id="filter-limit">
             <option value="50">50</option>
             <option value="100" selected>100</option>
@@ -57,34 +70,39 @@
             <option value="1000">1000</option>
           </select>
         </label>
-        <label class="auto"><input type="checkbox" id="hide-unknown" checked> Ukryj szum (unknown)</label>
-        <label class="auto"><input type="checkbox" id="hide-heartbeat"> Ukryj heartbeat</label>
-        <label class="auto"><input type="checkbox" id="auto" checked> Auto-odświeżanie</label>
-        <button id="refresh" type="button">Odśwież</button>
+        <input type="search" id="filter-text" placeholder="szukaj w wynikach (np. adres IP)" aria-label="szukaj w wynikach">
+        <label><input type="checkbox" id="hide-unknown" checked> ukryj szum (unknown)</label>
+        <label><input type="checkbox" id="hide-heartbeat"> ukryj heartbeat</label>
+        <label><input type="checkbox" id="auto" checked> odświeżaj co 4 s</label>
+        <button id="refresh" type="button">odśwież</button>
+        <span class="count" id="shown-count" aria-live="polite"></span>
       </div>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Znacznik czasu</th>
-          <th>Agent</th>
-          <th>Źródło</th>
-          <th>Operacja</th>
-          <th>Klasyfikacja</th>
-          <th>Szczegóły</th>
-          <th>Stan</th>
-        </tr>
-      </thead>
-      <tbody id="events">
-        <tr><td colspan="7" class="muted">Ładowanie…</td></tr>
-      </tbody>
-    </table>
-  </section>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>czas</th>
+              <th>agent</th>
+              <th>źródło</th>
+              <th>operacja</th>
+              <th>klasyfikacja</th>
+              <th>szczegóły</th>
+              <th>stan</th>
+            </tr>
+          </thead>
+          <tbody id="events">
+            <tr><td colspan="7" class="empty">ładowanie…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
 
-  <div id="drawer" class="drawer hidden">
+  <div id="drawer" class="drawer hidden" role="dialog" aria-label="Surowy raport">
     <div class="drawer-head">
-      <span id="drawer-title">Raport</span>
-      <button id="drawer-close" type="button">✕</button>
+      <span id="drawer-title">raport</span>
+      <button id="copy-json" type="button">kopiuj</button>
+      <button id="drawer-close" type="button">zamknij (esc)</button>
     </div>
     <pre id="drawer-body"></pre>
   </div>
