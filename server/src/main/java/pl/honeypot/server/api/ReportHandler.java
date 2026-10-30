@@ -1,5 +1,6 @@
 package pl.honeypot.server.api;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.javalin.http.BadRequestResponse;
 import io.javalin.http.Context;
@@ -20,6 +21,7 @@ public final class ReportHandler implements Handler {
     private static final Pattern REPORT_ID = Pattern.compile("^[0-9a-f]{64}$");
     private static final Pattern AGENT_ID = Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
     private static final Pattern OPERATION = Pattern.compile("^[a-z0-9_]{1,64}$");
+    private static final Pattern CLASSIFICATION = Pattern.compile("^[A-Za-z0-9_.-]{1,64}$");
     private static final java.util.Set<String> SOURCES =
             java.util.Set.of("share", "log", "network", "system", "monitor", "source");
 
@@ -58,6 +60,11 @@ public final class ReportHandler implements Handler {
         if (operation != null && !OPERATION.matcher(operation).matches()) {
             throw new BadRequestResponse("invalid operation");
         }
+        JsonNode analysis = body.get("analysis");
+        String classification = analysis != null ? str(analysis, "classification") : null;
+        if (classification != null && !CLASSIFICATION.matcher(classification).matches()) {
+            throw new BadRequestResponse("invalid classification");
+        }
 
         // Agent and server share a host: the agent sees its own upload connection
         // to our loopback listener and would report it, which uploads another
@@ -68,6 +75,9 @@ public final class ReportHandler implements Handler {
         }
 
         ReportStore.InsertResult r = reports.insert(body);
+        if (r.rejected()) {
+            throw new BadRequestResponse("too many distinct agents");
+        }
         if (r.duplicate()) {
             ctx.status(HttpStatus.OK).json(Map.of("report_id", reportId, "duplicate", true));
         } else {
@@ -95,7 +105,12 @@ public final class ReportHandler implements Handler {
         try {
             return ctx.bodyAsClass(JsonNode.class);
         } catch (Exception e) {
-            throw new BadRequestResponse("body must be valid JSON");
+            // Only parse errors are the client's fault here; anything else (such as
+            // 413 for an oversized body) keeps its own status.
+            if (e instanceof JsonProcessingException) {
+                throw new BadRequestResponse("body must be valid JSON");
+            }
+            throw e;
         }
     }
 

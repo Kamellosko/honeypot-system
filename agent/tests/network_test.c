@@ -76,6 +76,9 @@ int main(void) {
   const unsigned char samba[] = "status [NT_STATUS_WRONG_PASSWORD] remote host [ipv4:192.0.2.8:49282]. local host [ipv4:192.0.2.1:445]";
   hp_extract_ips(samba, sizeof(samba) - 1, &context);
   assert(context.count == 2 && !strcmp(context.ips[0], "192.0.2.8") && !strcmp(context.ips[1], "192.0.2.1"));
+  const unsigned char spoofed[] = "user=192.0.2.11 192.0.2.12 192.0.2.13 192.0.2.14 192.0.2.15 192.0.2.16 192.0.2.17 192.0.2.18 192.0.2.19 remote host [ipv4:192.0.2.8:49282]";
+  hp_extract_ips(spoofed, sizeof(spoofed) - 1, &context);
+  assert(context.count == HP_NETWORK_MAX && context.truncated && !strcmp(context.ips[0], "192.0.2.8"));
   const unsigned char binary[] = {'x', 0, '1','9','2','.','0','.','2','.','8',' ', 0xff};
   hp_extract_ips(binary, sizeof(binary), &context);
   assert(context.count == 1);
@@ -122,10 +125,18 @@ int main(void) {
   assert(cJSON_GetArraySize(endpoints) == 2);
   cJSON *entry = cJSON_GetArrayItem(endpoints, 0);
   assert(!strcmp(cJSON_GetObjectItem(entry, "ip")->valuestring, "192.0.2.8"));
-  assert(!strcmp(cJSON_GetObjectItem(entry, "mac")->valuestring, "02:11:22:33:44:55"));
+  assert(cJSON_GetObjectItem(entry, "mac")->type == cJSON_NULL);
   assert(cJSON_GetObjectItem(entry, "context_only")->type == cJSON_True);
   entry = cJSON_GetArrayItem(endpoints, 1);
   assert(cJSON_GetObjectItem(entry, "mac")->type == cJSON_NULL);
   cJSON_Delete(json); free(text);
+  const unsigned char text_only[] = "user=192.0.2.8";
+  text = NULL; size = 0;
+  out = open_memstream(&text, &size);
+  assert(out);
+  hp_write_network_context(out, text_only, sizeof(text_only) - 1);
+  assert(!fclose(out));
+  assert(strstr(text, "\"mac_status\":\"not_looked_up\"") && strstr(text, "\"mac\":null") && !strstr(text, "resolved"));
+  free(text);
   return 0;
 }

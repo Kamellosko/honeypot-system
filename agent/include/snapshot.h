@@ -17,6 +17,9 @@ struct hp_store {
   int pending_fd;
   struct hp_evidence recent[32];
   size_t recent_next;
+  /* Queue length estimate for report_begin only (-1 unknown); refreshed by a scan at most once per second. */
+  int pending_estimate;
+  double pending_scanned_at;
   /* One report writer owns this buffer until fclose; the sender only reads files. */
   char report_buffer[BUFSIZ];
 };

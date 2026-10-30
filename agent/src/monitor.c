@@ -129,6 +129,33 @@ int hp_monitor_add_log(struct hp_monitor *m, const char *path) {
   return 0;
 }
 
+static void remember_fingerprint(struct hp_log *log, const unsigned char *data, size_t length) {
+  unsigned char *fingerprint = log->fingerprint;
+  size_t size = sizeof(log->fingerprint);
+  if (length >= size) {
+    memcpy(fingerprint, data + length - size, size);
+    log->fingerprint_size = size;
+    return;
+  }
+  size_t kept = log->fingerprint_size;
+  if (kept + length > size) kept = size - length;
+  memmove(fingerprint, fingerprint + log->fingerprint_size - kept, kept);
+  memcpy(fingerprint + kept, data, length);
+  log->fingerprint_size = kept + length;
+}
+
+static int fingerprint_changed(int fd, const struct hp_log *log) {
+  unsigned char current[sizeof(log->fingerprint)];
+  if (!log->offset || !log->fingerprint_size) return 0;
+  ssize_t n;
+  do n = pread(fd, current, log->fingerprint_size, log->offset - (off_t)log->fingerprint_size);
+  while (n < 0 && errno == EINTR);
+  int changed = n != (ssize_t)log->fingerprint_size ||
+                memcmp(current, log->fingerprint, log->fingerprint_size) != 0;
+  explicit_bzero(current, sizeof(current));
+  return changed;
+}
+
 static int poll_logs(struct hp_monitor *m) {
   int failed = 0;
   for (size_t i = 0; i < m->log_count; i++) {
@@ -146,6 +173,7 @@ static int poll_logs(struct hp_monitor *m) {
     if (fstat(fd, &st) || !S_ISREG(st.st_mode)) { close(fd); failed = 1; continue; }
     if (!log->seen) {
       log->offset = st.st_size;
+      log->fingerprint_size = 0;
       log->seen = 1;
     } else if (log->device != st.st_dev || log->inode != st.st_ino) {
       if (log->partial_size &&
@@ -157,8 +185,8 @@ static int poll_logs(struct hp_monitor *m) {
       if (hp_report_simple(m->store, "log", "rotation", log->path, "possible_log_gap", NULL, 0)) {
         close(fd); failed = 1; continue;
       }
-      log->offset = 0;
-    } else if (st.st_size < log->offset) {
+      log->offset = 0; log->fingerprint_size = 0;
+    } else if (st.st_size < log->offset || fingerprint_changed(fd, log)) {
       if (log->partial_size &&
           hp_report_simple(m->store, "log", "append", log->path, "partial_record_at_truncation", log->partial, log->partial_size)) {
         close(fd); failed = 1; continue;
@@ -168,7 +196,7 @@ static int poll_logs(struct hp_monitor *m) {
       if (hp_report_simple(m->store, "log", "truncation", log->path, "possible_log_gap", NULL, 0)) {
         close(fd); failed = 1; continue;
       }
-      log->offset = 0;
+      log->offset = 0; log->fingerprint_size = 0;
     }
     log->device = st.st_dev; log->inode = st.st_ino;
     if (lseek(fd, log->offset, SEEK_SET) < 0) { close(fd); failed = 1; continue; }
@@ -190,11 +218,13 @@ static int poll_logs(struct hp_monitor *m) {
         const unsigned char *newline = memchr(buffer + pos, '\n', length);
         if (newline) length = (size_t)(newline - buffer - pos) + 1;
         memcpy(log->partial + log->partial_size, buffer + pos, length);
+        remember_fingerprint(log, buffer + pos, length);
         log->partial_size += length; log->offset += (off_t)length; pos += length;
         if (newline || log->partial_size == 65536) {
           if (hp_report_simple(m->store, "log", "append", log->path,
                                newline ? NULL : "long_record_segment", log->partial, log->partial_size)) {
             log->offset -= (off_t)log->partial_size;
+            log->fingerprint_size = 0; /* rewound: rebuilt by the next read */
             explicit_bzero(log->partial, log->partial_size); log->partial_size = 0;
             failed = 1; stop = 1; break;
           }
@@ -474,6 +504,7 @@ void hp_monitor_close(struct hp_monitor *m) {
   for (size_t i = 0; i < m->log_count; i++) {
     free(m->logs[i].path);
     if (m->logs[i].partial) explicit_bzero(m->logs[i].partial, 65536);
+    explicit_bzero(m->logs[i].fingerprint, sizeof(m->logs[i].fingerprint));
     free(m->logs[i].partial);
   }
   free(m->logs);

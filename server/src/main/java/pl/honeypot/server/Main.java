@@ -1,8 +1,10 @@
 package pl.honeypot.server;
 
+import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.Javalin;
 import io.javalin.http.staticfiles.Location;
+import io.javalin.json.JavalinJackson;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.eclipse.jetty.server.HttpConnectionFactory;
@@ -23,6 +25,10 @@ public final class Main {
         ServerConfig cfg = ServerConfig.load(configFile);
 
         ObjectMapper mapper = new ObjectMapper();
+        // Jackson rejects any single JSON string over 20M chars by default, and a report
+        // with a big base64 diff can be bigger than that. Same mapper for Javalin and the log.
+        mapper.getFactory().setStreamReadConstraints(
+                StreamReadConstraints.builder().maxStringLength(64 * 1024 * 1024).build());
 
         // Every agent report lands in data/events.jsonl, deduplicated by report_id.
         ReportStore reports = new ReportStore(
@@ -32,9 +38,10 @@ public final class Main {
 
         Javalin app = Javalin.create(c -> {
             c.showJavalinBanner = false;
+            c.jsonMapper(new JavalinJackson(mapper, false));
             // Agent reports can carry file diffs; the 1 MB default would reject them
             // with a 4xx and the agent would retry the same report forever.
-            c.http.maxRequestSize = 32L * 1024 * 1024;
+            c.http.maxRequestSize = 64L * 1024 * 1024;
             c.jetty.addConnector((server, httpConfig) -> {
                 SslContextFactory.Server ssl = new SslContextFactory.Server();
                 ssl.setKeyStorePath(cfg.keystore().toAbsolutePath().toString());

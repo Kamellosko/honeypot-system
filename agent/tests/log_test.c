@@ -59,6 +59,21 @@ int main(void) {
   assert(hp_monitor_poll(&monitor, 0) == 0);
   counting = 0;
   assert(reads <= 8 && hp_store_pending_count(&store) == before + 2);
+  char truncated[256];
+  snprintf(truncated, sizeof(truncated), "%s/truncate.log", dir);
+  f = fopen(truncated, "w"); assert(f); fclose(f);
+  assert(hp_monitor_add_log(&monitor, truncated) == 0);
+  assert(hp_monitor_poll(&monitor, 0) == 0);
+  char old[100], fresh[300];
+  memset(old, 'o', 99); old[99] = '\n';
+  f = fopen(truncated, "w"); assert(f && fwrite(old, 1, 100, f) == 100 && !fclose(f));
+  assert(hp_monitor_poll(&monitor, 0) == 0);
+  before = hp_store_pending_count(&store);
+  memset(fresh, 'n', 300); fresh[99] = fresh[199] = fresh[299] = '\n';
+  f = fopen(truncated, "w"); assert(f && fwrite(fresh, 1, 300, f) == 300 && !fclose(f));
+  assert(hp_monitor_poll(&monitor, 0) == 0);
+  /* possible_log_gap for the rewrite (size 300 > offset 100) plus three appended records */
+  assert(hp_store_pending_count(&store) == before + 4);
   hp_monitor_close(&monitor);
   hp_store_close(&store);
   return 0;

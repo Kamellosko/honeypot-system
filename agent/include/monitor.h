@@ -24,6 +24,9 @@ struct hp_log {
   int seen;
   unsigned char *partial;
   size_t partial_size;
+  /* Last bytes consumed before offset; detects a rewrite that does not shrink the file. */
+  unsigned char fingerprint[64];
+  size_t fingerprint_size;
 };
 struct hp_move {
   unsigned cookie;

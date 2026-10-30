@@ -24,18 +24,23 @@ public final class ReportStore {
 
     private static final Duration ONLINE_AFTER = Duration.ofSeconds(90);
 
-    public record InsertResult(long eventId, boolean duplicate) {
+    public record InsertResult(long eventId, boolean duplicate, boolean rejected) {
     }
 
-    // One agent's liveness and running totals (mutable, updated under the lock).
+    // Caps on client-chosen keys, so a stream of made-up values can't grow memory forever.
+    private static final int MAX_KEYS = 200;
+    private static final int MAX_AGENTS = 1000;
+
+    // One agent's liveness and running totals. Written under the lock, read without it,
+    // so the mutable fields are volatile.
     private static final class AgentState {
         String agentId;
-        Instant firstSeen;
-        Instant lastSeen;
-        String lastSource;
-        String lastOperation;
-        String lastClassification;
-        long totalReports;
+        volatile Instant firstSeen;
+        volatile Instant lastSeen;
+        volatile String lastSource;
+        volatile String lastOperation;
+        volatile String lastClassification;
+        volatile long totalReports;
     }
 
     // Snapshot of an agent for GET /api/v1/agents.
@@ -68,7 +73,7 @@ public final class ReportStore {
     private final Map<String, Long> bySource = new ConcurrentHashMap<>();
     private final Map<String, Long> byClassification = new ConcurrentHashMap<>();
     private final Map<String, Long> byOperation = new ConcurrentHashMap<>();
-    private long totalEvents;
+    private volatile long totalEvents;
 
     public ReportStore(JsonlLog log) {
         this.log = log;
@@ -94,7 +99,11 @@ public final class ReportStore {
         String reportId = text(report, "report_id");
         synchronized (lock) {
             if (reportId != null && seen.contains(reportId)) {
-                return new InsertResult(-1, true);
+                return new InsertResult(-1, true, false);
+            }
+            String agentId = text(report, "agent_id");
+            if (agentId != null && !agents.containsKey(agentId) && agents.size() >= MAX_AGENTS) {
+                return new InsertResult(-1, false, true);
             }
             // Write first: if the append fails nothing is remembered, so the
             // agent's retry is stored instead of being answered as a duplicate.
@@ -103,7 +112,7 @@ public final class ReportStore {
                 seen.add(reportId);
             }
             index(stamped);   // liveness uses the server's received_at, not the agent's
-            return new InsertResult(stamped.get("event_id").asLong(), false);
+            return new InsertResult(stamped.get("event_id").asLong(), false, false);
         }
     }
 
@@ -111,10 +120,10 @@ public final class ReportStore {
     private void index(JsonNode n) {
         totalEvents++;
         bump(bySource, text(n, "source"));
-        bump(byOperation, text(n, "operation"));
+        bump(byOperation, capKey(byOperation, text(n, "operation")));
         JsonNode analysis = n.get("analysis");
         String classification = analysis != null ? text(analysis, "classification") : null;
-        bump(byClassification, classification);
+        bump(byClassification, capKey(byClassification, classification));
 
         String agentId = text(n, "agent_id");
         if (agentId == null) {
@@ -156,46 +165,50 @@ public final class ReportStore {
         return out;
     }
 
+    // Lock-free: reads the concurrent map and volatile fields, so it never waits on an fsync.
     public List<AgentView> agents() {
         Instant now = Instant.now();
         List<AgentView> out = new ArrayList<>();
-        synchronized (lock) {
-            for (AgentState a : agents.values()) {
-                boolean online = a.lastSeen != null
-                        && Duration.between(a.lastSeen, now).compareTo(ONLINE_AFTER) <= 0;
-                out.add(new AgentView(
-                        a.agentId,
-                        online ? "online" : "offline",
-                        iso(a.lastSeen),
-                        iso(a.firstSeen),
-                        a.totalReports,
-                        a.lastSource,
-                        a.lastOperation,
-                        a.lastClassification));
-            }
+        for (AgentState a : agents.values()) {
+            Instant lastSeen = a.lastSeen;
+            boolean online = lastSeen != null
+                    && Duration.between(lastSeen, now).compareTo(ONLINE_AFTER) <= 0;
+            out.add(new AgentView(
+                    a.agentId,
+                    online ? "online" : "offline",
+                    iso(lastSeen),
+                    iso(a.firstSeen),
+                    a.totalReports,
+                    a.lastSource,
+                    a.lastOperation,
+                    a.lastClassification));
         }
         out.sort((x, y) -> x.agentId().compareTo(y.agentId()));
         return out;
     }
 
+    // Lock-free, like agents(). Counts may be a moment behind each other.
     public Stats stats() {
         Instant now = Instant.now();
-        synchronized (lock) {
-            int online = 0;
-            for (AgentState a : agents.values()) {
-                if (a.lastSeen != null
-                        && Duration.between(a.lastSeen, now).compareTo(ONLINE_AFTER) <= 0) {
-                    online++;
-                }
+        int online = 0;
+        for (AgentState a : agents.values()) {
+            Instant lastSeen = a.lastSeen;
+            if (lastSeen != null && Duration.between(lastSeen, now).compareTo(ONLINE_AFTER) <= 0) {
+                online++;
             }
-            return new Stats(
-                    totalEvents,
-                    agents.size(),
-                    online,
-                    new TreeMap<>(bySource),
-                    new TreeMap<>(byClassification),
-                    new TreeMap<>(byOperation));
         }
+        return new Stats(
+                totalEvents,
+                agents.size(),
+                online,
+                new TreeMap<>(bySource),
+                new TreeMap<>(byClassification),
+                new TreeMap<>(byOperation));
+    }
+
+    // Past MAX_KEYS distinct keys, a new key is counted under "other". Caller holds lock.
+    private static String capKey(Map<String, Long> counter, String key) {
+        return key == null || counter.containsKey(key) || counter.size() < MAX_KEYS ? key : "other";
     }
 
     private static void bump(Map<String, Long> counter, String key) {

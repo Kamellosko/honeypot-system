@@ -74,6 +74,7 @@ done:
 int hp_store_init(struct hp_store *s, const char *path, const char *id) {
   memset(s, 0, sizeof(*s));
   s->snapshots_fd = s->pending_fd = -1;
+  s->pending_estimate = -1;
   int parent = -1, root = -1;
   char *copy = path && path[0] == '/' ? strdup(path) : NULL;
   if (!copy) return -1;
@@ -349,10 +350,30 @@ static void json_path(FILE *out, const char *path) {
   }
 }
 
+// Avoids a full directory scan per report. The sender only deletes files, so the estimate can only be too high.
+static int pending_has_room(struct hp_store *s) {
+  struct timespec now;
+  double seconds = -1;
+  if (!clock_gettime(CLOCK_MONOTONIC, &now)) seconds = now.tv_sec + now.tv_nsec / 1e9;
+  int fresh = seconds >= 0 && s->pending_estimate >= 0 && seconds - s->pending_scanned_at < 1;
+  if (fresh && s->pending_estimate > PENDING_MAX) return 0;   /* still full: refuse without scanning, re-check within 1 s */
+  if (fresh && s->pending_estimate < PENDING_MAX - 100) {
+    s->pending_estimate++;
+    return 1;
+  }
+  int count = hp_store_pending_count(s);
+  if (count < 0) { s->pending_estimate = -1; return 1; }   /* scan error: accept, as before */
+  if (seconds >= 0) { s->pending_estimate = count; s->pending_scanned_at = seconds; }
+  else s->pending_estimate = -1;
+  if (count > PENDING_MAX) return 0;   /* server unreachable for a long time */
+  if (s->pending_estimate >= 0) s->pending_estimate++;
+  return 1;
+}
+
 static FILE *report_begin(struct hp_store *s, const char *source, const char *operation,
                           const char *path, char filename[80]) {
   char id[65], utc[32], tmp[80];
-  if (hp_store_pending_count(s) > PENDING_MAX) return NULL;   /* server unreachable for a long time */
+  if (!pending_has_room(s)) return NULL;   /* server unreachable for a long time */
   if (hp_report_id(id) || hp_utc_time(utc)) return NULL;
   snprintf(filename, 80, "%s.json", id);
   snprintf(tmp, 80, ".%s.tmp", id);
