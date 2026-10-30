@@ -147,6 +147,7 @@ Ma być `active (running)` i JSON z licznikami (same zera to normalne; dziwne zn
 
 Wymyśl 3 hasła (słabe, ale wiarygodne, w stylu `Lato2024!`) i podstaw je w miejsce `HASLO1`, `HASLO2`, `HASLO3`.
 **Nie zapisuj ich w repozytorium.** Zapamiętaj `HASLO1`: użyjesz go w teście z Minta.
+Żeby hasła nie trafiły do historii powłoki, możesz je zapisać w pliku (jeden wpis `login:haslo:grupy` na linię, uprawnienia 600) i podać `SMB_USERS_FILE=/ścieżka/plik` zamiast `SMB_USERS=...`. Usuń plik po instalacji.
 
 ```bash
 cd ~/honeypot-system

@@ -4,6 +4,12 @@
 #
 # Wymaga: rsync + klucz SSH (bez hasła) do celu, zapisany w ~/.ssh i zaufany.
 #
+# Uwaga: ten klucz leży na honeypocie, więc ktoś, kto przejmie roota, ma go też. Na maszynie odbiorczej:
+#   - ogranicz klucz do wgrywania w jeden katalog, w authorized_keys:
+#       restrict,command="rrsync -wo /srv/honeypot-logs" ssh-ed25519 AAAA... honeypot
+#   - klucz nadal może NADPISAĆ plik, więc odbiorca sam robi kopie, których ten klucz nie rusza,
+#     np. cron: cp /srv/honeypot-logs/events.jsonl /srv/honeypot-logs-archiwum/events-$(date +%F-%H).jsonl
+#
 # Użycie (jako root, najlepiej z cron co 5-10 min):
 #   REMOTE=backup@10.0.0.50:/srv/honeypot-logs/ /usr/local/sbin/sync-events.sh
 #   */10 * * * * root REMOTE=backup@10.0.0.50:/srv/honeypot-logs/ /usr/local/sbin/sync-events.sh

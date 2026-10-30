@@ -28,7 +28,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="certs"
 PASS="${KEYSTORE_PASSWORD:-changeit}"
-DAYS="${CERT_DAYS:-825}"
+DAYS="${CERT_DAYS:-3650}"   # po wygaśnięciu agent nie zweryfikuje TLS i cicho przestaje raportować, więc nie dajemy krótkiego terminu
 
 if [ "$#" -eq 0 ]; then
   set -- IP:127.0.0.1

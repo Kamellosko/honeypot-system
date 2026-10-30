@@ -116,7 +116,8 @@ chmod 644 /etc/systemd/system/sysmon-collector.service
 
 echo ">> Start usługi"
 systemctl daemon-reload
-systemctl enable --now sysmon-collector
+systemctl enable sysmon-collector
+systemctl restart sysmon-collector   # enable --now nie restartuje działającej usługi, więc po aktualizacji ruszałby stary jar
 sleep 2
 systemctl --no-pager status sysmon-collector || true
 

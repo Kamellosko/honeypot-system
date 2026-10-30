@@ -19,6 +19,7 @@
 #             Nie ma wartości domyślnej, żeby hasła nie trafiły do repozytorium. Przykład:
 #   sudo SMB_USERS='jkowalski:<haslo1>:pracownicy anowak:<haslo2>:pracownicy,ksiegowosc mwisniewska:<haslo3>:pracownicy,kadry' ./scripts/setup-samba-honeypot.sh
 #             Hasła mają być słabe, ale wiarygodne (np. Lato2024!), unikalne dla tej maszyny.
+#   SMB_USERS_FILE   plik z tymi samymi wpisami (jeden na linię) zamiast SMB_USERS; usuń go po instalacji.
 #   HP_WORKGROUP="FIRMA"   HP_SERVER_STRING="Serwer plikow"
 #   CLEANUP_OLD=yes|no     usuń stary udział /srv/samba/public i konto decoy (domyślnie yes)
 set -euo pipefail
@@ -30,6 +31,9 @@ fi
 
 HP_WORKGROUP="${HP_WORKGROUP:-FIRMA}"
 HP_SERVER_STRING="${HP_SERVER_STRING:-Serwer plikow}"
+# Hasła wolisz trzymać w pliku (SMB_USERS_FILE, jeden wpis na linię), a nie w historii powłoki.
+if [ -n "${SMB_USERS_FILE:-}" ]; then SMB_USERS=$(tr '\n' ' ' < "$SMB_USERS_FILE"); fi
+
 : "${SMB_USERS:?Ustaw SMB_USERS='login:haslo:grupy ...' (patrz komentarz na górze skryptu)}"
 CLEANUP_OLD="${CLEANUP_OLD:-yes}"
 BASE=/srv/samba
@@ -170,7 +174,8 @@ if ! firewall-cmd --state >/dev/null 2>&1; then
 fi
 firewall-cmd --add-service=samba --permanent
 firewall-cmd --reload
-systemctl enable --now smb nmb
+systemctl enable smb nmb
+systemctl restart smb nmb   # restart, żeby nowy smb.conf był wczytany także przy ponownym uruchomieniu skryptu
 
 echo
 echo "Gotowe. Udziały: Dokumenty, Faktury, Kadry w $BASE (workgroup $HP_WORKGROUP)."

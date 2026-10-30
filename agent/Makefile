@@ -12,7 +12,7 @@ HARDEN_CFLAGS = -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=$(FORTIFY_LEVEL) -fstack-pro
 HARDEN_LDFLAGS = -pie -Wl,-z,relro,-z,now,-z,noexecstack -Wl,--build-id=sha1
 INCLUDES = -Iinclude -Ithird_party/cJSON
 LDLIBS += -lcurl -lcrypto -ltdb -lpthread -lm
-SOURCES = src/main.c src/config.c src/monitor.c src/snapshot.c src/protocol.c src/port.c src/heartbeat.c src/network.c src/connections.c src/diff.c src/io.c
+SOURCES = src/main.c src/config.c src/monitor.c src/snapshot.c src/protocol.c src/port.c src/heartbeat.c src/network.c src/arp.c src/connections.c src/diff.c src/io.c
 TEST_COMMON = src/snapshot.c src/protocol.c
 TESTS = config snapshot binary monitor root_rebind rename_overwrite log protocol transport heartbeat network connections diff io
 

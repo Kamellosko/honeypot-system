@@ -110,7 +110,7 @@ Usługa uruchamia się automatycznie po włączeniu jej przez `systemctl enable`
 - `io.c` — kontrolowane otwieranie plików, uprawnienia, pełne zapisy i synchronizacja.
 - `protocol.c` — kodowanie JSON/base64, znaczniki czasu i identyfikatory raportów.
 - `port.c` — strumieniowe HTTPS i usuwanie raportu dopiero po potwierdzeniu.
-- `network.c`, `connections.c`, `heartbeat.c` — kontekst IP/ARP, obserwacja TCP i żywotność.
+- `network.c`, `arp.c`, `connections.c`, `heartbeat.c` — kontekst IP/ARP, obserwacja TCP i żywotność.
 
 Zachowuj prefiks `hp_`, dwie spacje wcięcia i sprawdzanie błędów. Nie zmieniaj źródeł cJSON razem z kodem agenta. Generator raportów danego magazynu ma jednego autora; wątek wysyłający czyta wyłącznie zatwierdzone pliki. Nie osłabiaj weryfikacji TLS, ograniczeń ścieżek ani zasady zatwierdzania raportu przed aktualizacją migawki. Treści logów i plików wymazuj z własnych buforów przez `explicit_bzero` przed ich zwolnieniem.
 

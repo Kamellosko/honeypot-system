@@ -59,7 +59,10 @@ if ! curl -sf "https://$SERVER_IP:$SERVER_PORT/api/v1/stats" >/dev/null; then
 fi
 
 echo ">> Build (release) + instalacja"
-make -C "$AGENT_SRC" release HARDEN_CFLAGS="$HARDEN"
+# Budujemy jako użytkownik, który wywołał sudo: build/ zrobiony przez roota blokuje potem zwykłe make i make check.
+BUILD_USER="${SUDO_USER:-root}"
+[ -d "$AGENT_SRC/build" ] && chown -R "$BUILD_USER": "$AGENT_SRC/build"
+runuser -u "$BUILD_USER" -- make -C "$AGENT_SRC" release HARDEN_CFLAGS="$HARDEN"
 make -C "$AGENT_SRC" install HARDEN_CFLAGS="$HARDEN"
 
 echo ">> Drop-in systemd z adresem serwera"
@@ -73,7 +76,8 @@ chmod 600 /etc/systemd/system/sys-auditd.service.d/override.conf
 
 echo ">> Start usługi"
 systemctl daemon-reload
-systemctl enable --now sys-auditd
+systemctl enable sys-auditd
+systemctl restart sys-auditd   # enable --now nie restartuje działającej usługi, więc po aktualizacji ruszałby stary program
 sleep 2
 systemctl --no-pager status sys-auditd || true
 

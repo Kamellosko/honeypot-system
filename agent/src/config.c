@@ -419,7 +419,8 @@ int hp_discover_config(const char *path, struct hp_sources *out) {
 }
 
 static int log_archive(const char *name) {
-  static const char *suffixes[] = { ".gz", ".xz", ".bz2", ".zst", ".zip" };
+  // ".old" is Samba's size rotation of the log that is already tailed; reading it again would replay it
+  static const char *suffixes[] = { ".gz", ".xz", ".bz2", ".zst", ".zip", ".old" };
   size_t n = strlen(name);
   for (size_t i = 0; i < sizeof(suffixes) / sizeof(*suffixes); i++) {
     size_t len = strlen(suffixes[i]);
