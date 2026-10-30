@@ -95,6 +95,15 @@ int main(void) {
   assert(hp_monitor_init(&monitor, &store) == 0);
   assert(hp_monitor_add_share(&monitor, "test", dir) == 0);
   assert(hp_store_pending_count(&store) >= 3);
+  char empty[256];
+  snprintf(empty, sizeof(empty), "%s/empty", dir);
+  size_t watches_before = monitor.watch_count;
+  assert(mkdir(empty, 0700) == 0);
+  assert(hp_monitor_poll(&monitor, 0) == 0);
+  assert(monitor.watch_count == watches_before + 1);
+  assert(rmdir(empty) == 0);
+  assert(hp_monitor_poll(&monitor, 0) == 0);
+  assert(monitor.watch_count == watches_before);
   hp_monitor_close(&monitor);
   hp_store_close(&store);
   return 0;

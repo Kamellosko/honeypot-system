@@ -395,7 +395,10 @@ int hp_monitor_poll(struct hp_monitor *m, int timeout_ms) {
         pos += sizeof(*event) + event->len;
         if (event->mask & IN_Q_OVERFLOW) {
           if (hp_report_simple(m->store, "monitor", "observation_gap", "", "inotify_overflow", NULL, 0)) failed = -1;
-          for (size_t i = 0; i < m->root_count; i++) if (watch_tree(m, i, "", 2)) failed = -1;
+          for (size_t i = 0; i < m->root_count; i++) {
+            if (watch_tree(m, i, "", 2)) failed = -1;
+            if (m->roots[i].fd >= 0 && hp_snapshot_reconcile_deleted(m->store, m->roots[i].fd, m->roots[i].path)) failed = -1;
+          }
           continue;
         }
         struct hp_watch *watch = NULL;
@@ -418,6 +421,7 @@ int hp_monitor_poll(struct hp_monitor *m, int timeout_ms) {
         }
         if (event->mask & IN_ISDIR) {
           if ((event->mask & (IN_CREATE | IN_MOVED_TO)) && watch_tree(m, watch->root, rel, 0)) failed = -1;
+          if (event->mask & IN_DELETE) drop_watches(m, watch->root, rel);
           continue;
         }
         if (event->mask & IN_CREATE) {

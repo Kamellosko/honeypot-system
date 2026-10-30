@@ -148,7 +148,8 @@ int hp_store_pending_count(const struct hp_store *s) {
     errno = 0;
     ent = readdir(dir);
     if (!ent) { if (errno) count = -1; break; }
-    if (strstr(ent->d_name, ".json")) {
+    // Same queue shape as the sender: '<64 hex>.json'; '.rejected' and other files do not count.
+    if (strlen(ent->d_name) == 69 && !strcmp(ent->d_name + 64, ".json") && strspn(ent->d_name, "0123456789abcdef") == 64) {
       if (count == INT_MAX) { count = -1; break; }
       count++;
     }
@@ -238,12 +239,31 @@ static int save_observed(struct hp_store *s, const char *key,
   return 0;
 }
 
+// An empty share root while snapshots exist usually means the share's disk is not mounted
+// (the mount point is an empty directory), not that every file was deleted.
+static int root_is_empty(int root_fd) {
+  int fd = openat(root_fd, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (fd < 0) return 0;
+  DIR *dir = fdopendir(fd);
+  if (!dir) { close(fd); return 0; }
+  int empty = 1;
+  struct dirent *ent;
+  errno = 0;
+  while ((ent = readdir(dir)))
+    if (strcmp(ent->d_name, ".") && strcmp(ent->d_name, "..")) { empty = 0; break; }
+  if (errno) empty = 0;
+  closedir(dir);
+  return empty;
+}
+
 int hp_snapshot_reconcile_deleted(struct hp_store *s, int root_fd, const char *root_path) {
   int fd = openat(s->snapshots_fd, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   if (fd < 0) return -1;
   DIR *dir = fdopendir(fd);
   if (!dir) { close(fd); return -1; }
   size_t prefix = strlen(root_path);
+  int root_empty = root_is_empty(root_fd);
+  size_t kept = 0;
   int result = 0;
   struct dirent *ent;
   for (;;) {
@@ -264,10 +284,13 @@ int hp_snapshot_reconcile_deleted(struct hp_store *s, int root_fd, const char *r
     const char *relative = full + prefix + 1;
     int current = open_rooted(root_fd, relative);
     if (current >= 0) { close(current); continue; }
-    if (errno == ENOENT || errno == ELOOP)
-      result |= hp_snapshot_event(s, root_fd, root_path, relative, "delete_during_downtime");
+    if (errno == ENOENT || errno == ELOOP) {
+      if (root_empty) kept++;   // keep the snapshot, one gap report below
+      else result |= hp_snapshot_event(s, root_fd, root_path, relative, "delete_during_downtime");
+    }
     else result |= hp_report_simple(s, "share", "observation_gap", full, "reconcile_access_failed", NULL, 0);
   }
+  if (kept && hp_report_simple(s, "monitor", "observation_gap", root_path, "share_root_empty", NULL, 0)) result = -1;
   if (closedir(dir)) result = -1;
   return result ? -1 : 0;
 }
@@ -391,6 +414,8 @@ int hp_report_simple(struct hp_store *s, const char *source, const char *operati
     classification = "authentication_success";
   else if (content && memmem(content, content_size, "smbd_audit:", 11))
     classification = "samba_audit";
+  else if (!strcmp(operation, "heartbeat"))
+    classification = "heartbeat";
   fprintf(out, ",\"metadata\":{},\"analysis\":{\"classification\":\"%s\"}", classification);
   if (content) {
     fputs(",\"network_context\":", out);

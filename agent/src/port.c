@@ -30,6 +30,7 @@ int hp_send_pending(struct hp_store *store, const char *ip, unsigned short port)
   DIR *dir = fdopendir(fd);
   if (!dir) { close(fd); return -1; }
   int delivered = 0;
+  int failures = 0;   // consecutive sends the server answered with 5xx/408/429
   for (;;) {
     errno = 0;
     struct dirent *ent = readdir(dir);
@@ -37,7 +38,7 @@ int hp_send_pending(struct hp_store *store, const char *ip, unsigned short port)
     size_t name_len = strlen(ent->d_name);
     if (name_len != 69 || strcmp(ent->d_name + 64, ".json") || strspn(ent->d_name, "0123456789abcdef") != 64) continue;
     int report_fd = hp_private_file(store->pending_fd, ent->d_name, O_RDONLY, 0);
-    if (report_fd < 0) { if (errno == ENOENT) continue; delivered = -1; break; }
+    if (report_fd < 0) continue;   // unreadable entry (bad mode, symlink): skip it, the rest still go out
     struct stat st;
     if (fstat(report_fd, &st) || st.st_size < 0) { close(report_fd); delivered = -1; break; }
     FILE *input = fdopen(report_fd, "r");
@@ -47,6 +48,7 @@ int hp_send_pending(struct hp_store *store, const char *ip, unsigned short port)
     struct curl_slist *headers = NULL;
     int acknowledged = 0;
     int rejected = 0;   // server answered with a final 3xx/4xx: retrying can never succeed
+    int retry_later = 0;   // server answered 5xx/408/429: this report may be fine, try the next one
     int n = snprintf(url, sizeof(url), strchr(ip, ':') ? "https://[%s]:%hu/events" : "https://%s:%hu/events", ip, port);
     if (n < 0 || n >= (int)sizeof(url) || setvbuf(input, input_buffer, _IOFBF, sizeof(input_buffer))) {
       delivered = -1; goto cleanup;
@@ -76,6 +78,7 @@ int hp_send_pending(struct hp_store *store, const char *ip, unsigned short port)
     if (result == CURLE_OK && curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status) == CURLE_OK) {
       acknowledged = status >= 200 && status < 300;
       rejected = status >= 300 && status < 500 && status != 408 && status != 429;
+      retry_later = status >= 500 || status == 408 || status == 429;
     }
 cleanup:
     curl_slist_free_all(headers);
@@ -94,6 +97,9 @@ cleanup:
       if (unlinkat(store->pending_fd, ent->d_name, 0) || hp_sync(store->pending_fd)) delivered = -1;
       else delivered = 1;
     }
+    // No HTTP answer (connection or TLS error) stops the round as before; a 5xx/408/429 answer
+    // moves on, and only 3 failures in a row end the round. Files are never parked for this.
+    if (retry_later && delivered == 0 && ++failures < 3) continue;
     break;
   }
   if (closedir(dir)) return -1;

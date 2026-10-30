@@ -90,6 +90,27 @@ int main(void) {
   assert(unlink(file) == 0);
   assert(hp_snapshot_event(&store, root, dir, "data", "delete") == 0);
   assert(hp_store_pending_count(&store) == 3);
+  // An empty share root (e.g. a disk that is not mounted) must not wipe the snapshots:
+  // reconcile keeps them and reports one gap instead of one delete per file.
+  char share[300], sfile[400];
+  snprintf(share, sizeof(share), "%s/share", dir);
+  snprintf(sfile, sizeof(sfile), "%s/f", share);
+  assert(mkdir(share, 0700) == 0);
+  f = fopen(sfile, "w");
+  assert(f);
+  fputs("x\n", f); fclose(f);
+  assert(chmod(sfile, 0600) == 0);
+  int share_fd = open(share, O_RDONLY | O_DIRECTORY);
+  assert(share_fd >= 0);
+  assert(hp_snapshot_event(&store, share_fd, share, "f", "baseline") == 0);
+  assert(unlink(sfile) == 0);
+  assert(hp_snapshot_reconcile_deleted(&store, share_fd, share) == 0);
+  assert(hp_snapshot_has(&store, share, "f"));
+  assert(last_report(state, "delete_during_downtime") == NULL);
+  report = last_report(state, "observation_gap");
+  assert(report);
+  cJSON_Delete(report);
+  close(share_fd);
   assert(symlink("/etc/passwd", file) == 0);
   assert(hp_snapshot_event(&store, root, dir, "data", "modify") != 0);
   hp_store_close(&store);

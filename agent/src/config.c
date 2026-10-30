@@ -51,7 +51,7 @@ int hp_validate_args(const char *id, const char *ip, const char *port) {
   unsigned char addr[16];
   char *end;
   long n;
-  if (!id || !*id || strlen(id) > 128 || !ip || !port || !*port) return -1;
+  if (!id || !*id || strlen(id) > 64 || !ip || !port || !*port) return -1;
   for (const unsigned char *p = (const unsigned char *)id; *p; p++)
     if (*p < 0x20 || *p > 0x7e) return -1;
   if (inet_pton(AF_INET, ip, addr) != 1 && inet_pton(AF_INET6, ip, addr) != 1) return -1;
