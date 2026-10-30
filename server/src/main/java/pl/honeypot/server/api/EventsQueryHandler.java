@@ -6,8 +6,12 @@ import io.javalin.http.Handler;
 import pl.honeypot.server.store.ReportStore;
 
 // GET /api/v1/events - collected reports, newest first.
-// Optional query params: agent_id, source (share|log|network|system) and limit.
+// Optional query params: agent_id, source (share|log|network|system) and limit
+// (default 100, capped at 1000).
 public final class EventsQueryHandler implements Handler {
+
+    private static final int DEFAULT_LIMIT = 100;
+    private static final int MAX_LIMIT = 1000;
 
     private final ReportStore reports;
 
@@ -20,7 +24,7 @@ public final class EventsQueryHandler implements Handler {
         String agentId = blankToNull(ctx.queryParam("agent_id"));
         String source = blankToNull(ctx.queryParam("source"));
 
-        Integer limit = null;
+        int limit = DEFAULT_LIMIT;
         String rawLimit = ctx.queryParam("limit");
         if (rawLimit != null && !rawLimit.isBlank()) {
             try {
@@ -31,6 +35,7 @@ public final class EventsQueryHandler implements Handler {
             if (limit < 1) {
                 throw new BadRequestResponse("limit must be >= 1");
             }
+            limit = Math.min(limit, MAX_LIMIT);
         }
 
         ctx.json(reports.list(agentId, source, limit));

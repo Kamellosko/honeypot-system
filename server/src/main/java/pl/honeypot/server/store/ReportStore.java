@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,13 +78,13 @@ public final class ReportStore {
     // Seeds dedup set, liveness and counters from whatever is already on disk.
     private void rebuild() {
         synchronized (lock) {
-            for (JsonNode n : log.read()) {
+            log.forEach(n -> {
                 String reportId = text(n, "report_id");
                 if (reportId != null) {
                     seen.add(reportId);
                 }
                 index(n);
-            }
+            });
         }
     }
 
@@ -143,21 +142,17 @@ public final class ReportStore {
 
     // Collected reports, newest first, optionally filtered and capped.
     public List<JsonNode> list(String agentId, String source, Integer limit) {
-        List<JsonNode> all = log.read();
-        Collections.reverse(all); // read() returns oldest first
         List<JsonNode> out = new ArrayList<>();
-        for (JsonNode n : all) {
+        log.readNewestFirst(n -> {
             if (agentId != null && !agentId.equals(text(n, "agent_id"))) {
-                continue;
+                return true;
             }
             if (source != null && !source.equals(text(n, "source"))) {
-                continue;
+                return true;
             }
             out.add(n);
-            if (limit != null && out.size() >= limit) {
-                break;
-            }
-        }
+            return limit == null || out.size() < limit;
+        });
         return out;
     }
 
