@@ -129,9 +129,9 @@ i po kliknięciu pełny surowy JSON raportu. Kolory zależą od klasyfikacji: cz
 
 Kto to zrobił, z samego raportu nie wynika. Trzeba to dopasować po czasie do raportów `tcp_connection_observed` i logowań.
 
-## Znane luki (szczegóły w `NOTATKA-dzialanie-systemu.md`, rozdz. 13)
+## Znane luki (szczegóły w `dzialanie-systemu.md`, rozdz. 13)
 
 - Odczyt lub pobranie pliku nie zostawia śladu, bo Samba nie ma włączonego audytu operacji na plikach.
-- Adres IP w logach Samby (format `ipv4:A.B.C.D:port`) nie jest wyciągany. IP trzeba dopasować po czasie z raportu o połączeniu.
 - Brak korelacji zdarzeń i progów (np. „20 prób logowania z jednego IP"). Ocenia analityk.
+- Każde połączenie do portów 22, 139 i 445 jest zgłaszane jako połączenie z wabikiem, także Twoje własne sesje SSH i tunel do dashboardu. Maszyna ma stać w izolowanej sieci.
 - API serwera nie ma uwierzytelniania i chroni je tylko nasłuch na `127.0.0.1`.

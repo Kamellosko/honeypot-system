@@ -1,25 +1,20 @@
 # API serwera (v1)
 
-Transport: **HTTPS** (TLS wymagany). Treść JSON (`Content-Type: application/json`).
-Agent inicjuje każde połączenie i wysyła **wszystkie** raporty na jeden endpoint
-(`POST /events`). Endpointy odczytu (`/api/v1/...`) służą dashboardowi.
+Transport: **HTTPS** (TLS 1.2+), treść JSON. Serwer nasłuchuje
+na `127.0.0.1:8443`; z zewnątrz tylko przez tunel SSH. Agent wysyła **wszystkie** raporty na
+`POST /events`, endpointy `GET /api/v1/...` służą dashboardowi. API **nie ma uwierzytelniania**
+(ochrona: bind na loopbacku i uprawnienia plików); każdy lokalny użytkownik, który zobaczy port,
+może czytać dane i wysyłać raporty.
 
-Agent weryfikuje łańcuch TLS oraz adres/host odbiornika w SAN certyfikatu i nie da
-się tego wyłączyć po stronie agenta. Certyfikat musi być zaufany przez agenta
-(`SSL_CERT_FILE` lub systemowy magazyn CA), a jego SAN musi zawierać dokładnie
-adres, pod który agent się łączy. Keystore i CA tworzy `scripts/gen-certs.sh`.
-
----
+Agent weryfikuje łańcuch TLS i adres w SAN certyfikatu (nie da się tego wyłączyć). Certyfikat
+tworzy `server/scripts/gen-certs.sh` (SAN domyślnie `IP:127.0.0.1`), a CA musi być w magazynie
+zaufania systemu (`/etc/pki/ca-trust/source/anchors/sysmon-ca.crt`).
 
 ## 1. Zgłoszenie raportu (agent → serwer)
 
 ```
-POST /events
+POST /events        Content-Type: application/json        (do 32 MB)
 ```
-
-Agent wysyła tu każdy typ raportu: zmianę pliku, rename, usunięcie, obserwację
-połączenia TCP, dowód z logu oraz heartbeat. Wszystkie dzielą wspólną kopertę,
-a pola specyficzne zależą od `source`/`operation`.
 
 Wspólna koperta:
 
@@ -27,34 +22,33 @@ Wspólna koperta:
 |------|-----|------|
 | `schema_version` | int | zawsze `1` |
 | `report_id` | string | 64 znaki hex (lowercase), unikalny; transmisja bywa ponawiana |
-| `agent_id` | string | identyfikator agenta |
+| `agent_id` | string | `[A-Za-z0-9._-]`, 1–64 znaków |
 | `observed_at` | string | czas zdarzenia UTC, `YYYY-MM-DDTHH:MM:SSZ` |
-| `source` | string | `share` \| `log` \| `network` \| `system` |
-| `operation` | string | np. `create`, `delete`, `rename`, `downtime_change`, `tcp_connection_observed`, `observation_gap`, `heartbeat` |
+| `source` | string | `share` \| `log` \| `network` \| `system` \| `monitor` \| `source` |
+| `operation` | string | `[a-z0-9_]`, 1–64 znaków, np. `create_delete`, `append`, `tcp_connection_observed`, `observation_gap`, `heartbeat` |
 | `path` | string \| null | ścieżka; `null` + `path_base64` gdy nazwa nie jest poprawnym UTF-8 |
 | `analysis` | object | `{ "classification": ..., "actor": null }` |
 | `complete` | bool | czy raport jest kompletny |
 | `error` | string \| null | przyczyna niekompletności |
 
-Pola zależne od typu: `metadata` (rozmiary/uprawnienia pliku), `content_changes`
-(`old_sha256`/`new_sha256` + diff lub bloki base64), `evidence[]`,
-`connection{}` (dla `network`), `previous_path` (dla `rename`), `content` /
-`content_base64` i `network_context` (dla dowodów z logów).
-
-Przykłady: `examples/report-*.json`. Źródłem prawdy o schemacie jest kod agenta
-(`agent/src/snapshot.c`, `network.c`, `heartbeat.c`).
+Pola zależne od typu: `metadata`, `content_changes`, `evidence[]`, `connection{}`,
+`previous_path`, `content` / `content_base64`, `network_context`. Przykłady: `examples/report-*.json`.
+Źródłem prawdy o schemacie jest kod agenta (`agent/src/snapshot.c`, `network.c`, `heartbeat.c`).
 
 **Odpowiedzi**
-- `201 Created` → `{"event_id": N, "report_id": "..."}` — raport zapisany.
-- `200 OK` → `{"report_id": "...", "duplicate": true}` — ten `report_id` już był
-  (ponowiona dostawa); nie zapisujemy drugi raz.
-- `400` — błędna koperta (`schema_version`, `report_id` lub `agent_id`).
 
-Serwer odpowiada 2xx **dopiero po zapisaniu** raportu (agent kasuje go z kolejki
-po 2xx; inny kod → ponawia). Każde 2xx (także dla duplikatu) zamyka pozycję w
-kolejce agenta. Serwer dokleja własne `event_id` i `received_at`.
+| Kod | Treść | Znaczenie dla agenta |
+|-----|-------|----------------------|
+| `201` | `{"event_id": N, "report_id": "..."}` | zapisany (na dysku, `fsync`) — agent kasuje z kolejki |
+| `200` | `{"report_id": "...", "duplicate": true}` | ten `report_id` już był — agent kasuje |
+| `200` | `{"report_id": "...", "ignored": true}` | własne połączenie agenta z serwerem na loopbacku (zapobiega pętli zwrotnej); nie zapisano — agent kasuje |
+| `400` | błąd | zły JSON albo zła koperta (`schema_version`, `report_id`, `agent_id`, `source`, `operation`, `analysis.classification` `[A-Za-z0-9_.-]`, 1–64 znaki) albo więcej niż 1000 różnych `agent_id` — agent **przenosi raport do `*.rejected`** i wysyła następne |
+| `413` | błąd | raport > 64 MB — jak wyżej |
+| `5xx` | błąd | chwilowy problem — agent ponawia ten sam raport |
 
----
+Serwer odpowiada 2xx dopiero po zapisie. Przy błędzie zapisu (np. brak miejsca) odpowiada 500 i **nie**
+zapamiętuje `report_id`, więc ponowna wysyłka zostanie zapisana. Serwer dokleja `event_id` i `received_at`
+(czas serwera; używany też do oceny, czy agent jest `online`).
 
 ## 2. Lista agentów (serwer → dashboard)
 
@@ -62,44 +56,19 @@ kolejce agenta. Serwer dokleja własne `event_id` i `received_at`.
 GET /api/v1/agents
 ```
 
-Agenci wykrywani są dynamicznie z napływających raportów (brak provisioningu).
-
-```json
-[
-  {
-    "agent_id": "alma10-01",
-    "status": "online",
-    "last_seen": "2026-10-18T12:52:09Z",
-    "first_seen": "2026-10-18T12:50:00Z",
-    "total_reports": 42,
-    "last_source": "share",
-    "last_operation": "create",
-    "last_classification": "file_change"
-  }
-]
-```
-
-`status` to `online`, gdy ostatni raport dotarł w ciągu 90 s, inaczej `offline`.
-
----
+Agenci wykrywani są dynamicznie z raportów. `status` to `online`, gdy ostatni raport dotarł w ciągu 90 s,
+inaczej `offline`. Pola: `agent_id`, `status`, `last_seen`, `first_seen`, `total_reports`,
+`last_source`, `last_operation`, `last_classification`.
 
 ## 3. Dziennik zdarzeń (serwer → dashboard)
 
 ```
-GET /api/v1/events
+GET /api/v1/events?agent_id=&source=&limit=
 ```
 
-Zwraca zapisane raporty, najnowsze pierwsze. Parametry (opcjonalne):
-
-| Parametr | Opis |
-|----------|------|
-| `agent_id` | filtr po agencie |
-| `source` | filtr po `source` (`share`/`log`/`network`/`system`) |
-| `limit` | ogranicza do N najnowszych (≥ 1) |
-
-Każdy element to pełny raport agenta wzbogacony o `event_id` i `received_at`.
-
----
+Najnowsze pierwsze; `limit` ≥ 1, domyślnie 100, maksymalnie 1000 (większa wartość jest obcinana do 1000).
+Każdy element to pełny raport z `event_id` i `received_at`. Serwer czyta plik zdarzeń od końca i
+zatrzymuje się po `limit` pasujących raportach, więc koszt nie zależy od rozmiaru całego pliku.
 
 ## 4. Statystyki (serwer → dashboard)
 
@@ -107,23 +76,12 @@ Każdy element to pełny raport agenta wzbogacony o `event_id` i `received_at`.
 GET /api/v1/stats
 ```
 
-```json
-{
-  "total_events": 42,
-  "total_agents": 1,
-  "online_agents": 1,
-  "by_source": { "share": 30, "network": 8, "system": 4 },
-  "by_classification": { "file_change": 25, "tcp_connection": 8 },
-  "by_operation": { "create": 20, "heartbeat": 4 }
-}
-```
-
----
+Pola: `total_events`, `total_agents`, `online_agents`, `by_source`, `by_classification`, `by_operation`.
+W `by_classification` i `by_operation` jest najwyżej 200 różnych kluczy, dalsze nowe wartości liczą się pod `other`.
 
 ## Uwagi
 
-- **MAC przechodzi tylko w obrębie jednej sieci L2.** Dla atakującego zza routera
-  agent zobaczy MAC bramy lub nic; w raportach połączeń `peer.mac` bywa `null`
-  z `mac_status` wyjaśniającym powód. `src_ip`/`peer.ip` jest wiarygodniejsze.
-- Raporty mogą zawierać treść plików i logów — zabezpiecz serwer i `data/`.
+- Pliki zdarzeń: `/var/lib/sysmon/events.jsonl` (`0600`). Zawierają treść plików i logów.
+- **MAC przechodzi tylko w obrębie jednej sieci L2.** Dla napastnika zza routera `peer.mac` bywa `null`
+  z `mac_status` wyjaśniającym powód.
 - Deduplikacja po `report_id` jest po stronie serwera; agent może słać duplikaty.

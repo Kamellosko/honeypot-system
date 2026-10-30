@@ -378,6 +378,11 @@ Skutki: awaria serwera nie gubi danych (kolejka rośnie do 10 000); dostawa to *
 
 Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
 
+> **Stan z 2026-10-23, część luk jest już naprawiona** (audyt z 2026-10-30): punkt 1 (adres IP z logów Samby jest wyciągany; adres z `remote host [` idzie pierwszy,
+> a MAC z ARP szukany jest tylko dla klienta TCP), punkt 3 (rozpoznawane są też `NT_STATUS_WRONG_PASSWORD` i `NT_STATUS_NO_SUCH_USER`; nowa klasyfikacja
+> `authentication_success` i `heartbeat`), punkt 7 (`GET /events` czyta plik od końca z domyślnym limitem 100) oraz punkt 9 (pliki `.rejected` nie liczą się do limitu kolejki).
+> Pozostałe punkty opisują stan niezmieniony. Lista napraw z audytu jest w historii zmian repozytorium (commity na gałęziach `afteraudit*`).
+
 ### 13.1 Wysoki wpływ
 1. **Adres IP z logów Samby nie jest wyciągany [sprawdzone testem].** Samba zapisuje klienta jako `ipv4:A.B.C.D:port`;
    token ma dwa dwukropki i `hp_extract_ips` go odrzuca. Na przykładowej linii w tym formacie: 0 adresów; w linii sshd
@@ -391,7 +396,7 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
    (`/var/log/messages` jest monitorowany); brakuje tylko konfiguracji po stronie Samby.
 3. **Czy `NT_STATUS_LOGON_FAILURE` w ogóle pojawia się w logu [do weryfikacji].** Klasyfikacja `authentication_failure` zależy od tego dokładnego
    ciągu. Z pamięci o Sambie wpisy `auth_audit` dla złego hasła/nieznanego użytkownika mogą nosić `NT_STATUS_WRONG_PASSWORD` / `NT_STATUS_NO_SUCH_USER`.
-   Test z `NOTATKA-samba.md` pkt 4 (`smbclient … -U jkowalski%zle`) rozstrzyga to jednoznacznie — po nim należy zajrzeć w
+   Test z `INSTALL.md` (sekcja 6) (`smbclient … -U jkowalski%zle`) rozstrzyga to jednoznacznie — po nim należy zajrzeć w
    `/var/log/samba/log.smbd` i w raport na dashboardzie. Jeśli ciągu nie ma, trzeba rozszerzyć listę w `hp_report_simple` (`snapshot.c`).
 
 ### 13.2 Średni wpływ
@@ -399,7 +404,7 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
 5. **Historia logów sprzed startu agenta jest pomijana** (offset na końcu przy pierwszym zobaczeniu pliku).
 6. **Serwer bez uwierzytelniania**: każdy, kto dotrze do `127.0.0.1:8443` (czyli atakujący z shellem na H), może wstrzyknąć fałszywe raporty
    i czytać wszystko przez API (raporty zawierają treść plików i logów). Zewnętrznie chroni tylko bind na loopback i brak reguły w firewallu.
-   Projekt (`projekt_honeypot.md`) przewiduje token / mTLS, ale nie jest to zaimplementowane.
+   Projekt (`projekt_honeypot.md` w tym katalogu) przewiduje token / mTLS, ale nie jest to zaimplementowane.
 7. **Skalowanie serwera**: każde zapytanie `GET /api/v1/events` czyta i parsuje **cały** `events.jsonl`; dashboard robi to co 4 s.
    Przy dużym ruchu logów (jedna linia = jeden raport) plik szybko rośnie. Zbiór `report_id` też rośnie w pamięci bez limitu.
 8. **Walidacja ID**: agent dopuszcza `--id` do 64 znaków ASCII drukowalnych, serwer tylko `[A-Za-z0-9._-]{1,64}`. ID z innymi znakami → 400 → wszystkie raporty
@@ -414,9 +419,9 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
     luki obserwacji nie są podświetlone jako ostrzeżenia.
 12. W kodzie baseline na ponownym starcie daje operację `reconcile` (nie `downtime_change`, jak opisuje `server/docs/api.md`); `downtime_change`
     wystąpi tylko, gdy migawka istnieje, ale brak znacznika `root-…`.
-13. `NOTATKA-samba.md` każe mieć `log file = /var/log/samba/log.%m`, a skrypt zapisuje `log.smbd`. Agent obsługuje oba warianty
+13. (Rozwiązane: wszystkie dokumenty mówią `log.smbd`.) Dawniej notatka o Sambie podawała `log.%m`, a skrypt zapisuje `log.smbd`. Agent obsługuje oba warianty
     (czyta cały `/var/log/samba/`), ale notatka i skrypt powinny mówić to samo.
-14. Brakuje plików, do których odnoszą się dokumenty: `INSTALL.md`, `REALIZM.md`, `agent/README-technical.md`.
+14. (Rozwiązane) `INSTALL.md` istnieje w katalogu głównym; odwołania do `REALIZM.md` i `agent/README-technical.md` usunięto.
 15. W `server/certs/` leżą klucze prywatne (`ca.key`, `server.key`) — przed realnym wdrożeniem wygenerować nowe poza repozytorium.
 16. README agenta mówi o AlmaLinux 10, skrypty o 9.8 (stąd `FORTIFY_LEVEL=2` w `install-agent-service.sh`). Wymaga jednorazowego sprawdzenia, że agent
     buduje się na 9.8 (`openat2`, `libtdb-devel`).

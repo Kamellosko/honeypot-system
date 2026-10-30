@@ -1,4 +1,4 @@
-Program jest usługą użytkową dla AlmaLinux 10: wykrywa udziały Samby, obserwuje pliki i logi, przechowuje migawki, generuje JSON oraz wysyła raporty przez zweryfikowane HTTPS. Nie jest modułem jądra ani biblioteką do bezpośredniego linkowania. Do integracji z innym systemem służy odbiornik raportów HTTPS.
+Program jest usługą użytkową dla AlmaLinux 9.8 i 10: wykrywa udziały Samby, obserwuje pliki i logi, przechowuje migawki, generuje JSON oraz wysyła raporty przez zweryfikowane HTTPS. Nie jest modułem jądra ani biblioteką do bezpośredniego linkowania. Do integracji z innym systemem służy odbiornik raportów HTTPS.
 
 ## 1. Zawartość
 
@@ -9,15 +9,13 @@ Program jest usługą użytkową dla AlmaLinux 10: wykrywa udziały Samby, obser
 | `third_party/cJSON/` | Biblioteka używana przez testy, z oryginalnymi informacjami licencyjnymi |
 | `packaging/` | Jednostka systemd i przykład nadpisania parametrów |
 | `Makefile` | Budowanie, testowanie, instalacja i czyszczenie |
-| `README-technical.md` | Szczegółowa dokumentacja działania, schematu raportów i ograniczeń |
-| `docs/` | Historyczny projekt i plan implementacji; aktualne zachowanie opisuje dokumentacja techniczna i kod |
-| `LICENSE` | Licencja projektu GPL v2; zachowaj także informacje licencyjne zależności |
+| `../docs/dzialanie-systemu.md` | Szczegółowy opis działania agenta, schematu raportów i znanych ograniczeń |
 
 Pakiet nie zawiera binariów, symboli diagnostycznych, zebranych logów, migawek, kolejki raportów ani lokalnych ustawień narzędzi programistycznych.
 
 ## 2. Wymagania i kompilacja
 
-Zalecane środowisko: AlmaLinux 10, GNU make >= 4.3, współczesny GCC i glibc, Linux z obsługą `openat2`.
+Zalecane środowisko: AlmaLinux 9.8 lub 10, GNU make >= 4.3, GCC i glibc, Linux z obsługą `openat2`. Na Almie 9 (GCC 11) Makefile domyślnie używa `_FORTIFY_SOURCE=2`; na nowszym kompilatorze zbuduj z `FORTIFY_LEVEL=3`.
 
 ```sh
 sudo dnf install gcc make binutils libcurl-devel openssl-devel libtdb-devel samba ca-certificates python3 openssl
@@ -118,10 +116,10 @@ Zachowuj prefiks `hp_`, dwie spacje wcięcia i sprawdzanie błędów. Nie zmieni
 
 ## 6. Ograniczenia i testy na serwerze
 
-Parser nie odtwarza całej semantyki Samby: obsługuje statyczny podzbiór `smb.conf`, lokalne konta tdbsam v4 lub smbpasswd oraz wybrane podstawienia `[homes]`. Nieobsługiwane konfiguracje i źródła muszą być widoczne w raportach statusu. Restrykcyjne otwieranie ścieżek odrzuca symlinki, także w systemowych plikach include. Szczegóły i limity są w `README-technical.md`.
+Parser nie odtwarza całej semantyki Samby: obsługuje statyczny podzbiór `smb.conf`, lokalne konta tdbsam v4 lub smbpasswd oraz wybrane podstawienia `[homes]`. Nieobsługiwane konfiguracje i źródła muszą być widoczne w raportach statusu. Restrykcyjne otwieranie ścieżek odrzuca symlinki, także w systemowych plikach include. Szczegóły i limity są w `../docs/dzialanie-systemu.md`.
 
 Obserwacja TCP korzysta z okresowych migawek tabeli gniazd. Może pominąć krótkie połączenia i nie dowodzi wywołania `accept()`. Adres MAC z lokalnej pamięci ARP jest kontekstem, nie dowodem sprawstwa; dla zdalnego klienta może być niedostępny.
 
-Przed wdrożeniem sprawdź na AlmaLinux 10: rzeczywistą konfigurację Samby i `[homes]`, rotację logów rsyslog, SELinux w trybie enforcing, akceptację i odrzucanie certyfikatów, brak odbiornika, zapełnienie dysku oraz restart usługi. Projekt nie konfiguruje Samby, audytu, rsyslog ani SELinux automatycznie. Stan zawiera migawki i raporty, więc nie usuwaj go podczas aktualizacji; przed migracją wykonaj prywatną kopię.
+Przed wdrożeniem sprawdź na docelowej Almie: rzeczywistą konfigurację Samby i `[homes]`, rotację logów rsyslog, SELinux w trybie enforcing, akceptację i odrzucanie certyfikatów, brak odbiornika, zapełnienie dysku oraz restart usługi. Projekt nie konfiguruje Samby, audytu, rsyslog ani SELinux automatycznie. Stan zawiera migawki i raporty, więc nie usuwaj go podczas aktualizacji; przed migracją wykonaj prywatną kopię.
 
 Lokalne testy i zabezpieczenia ELF nie zastępują weryfikacji środowiska produkcyjnego.

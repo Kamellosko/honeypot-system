@@ -91,4 +91,4 @@ fi
 
 echo
 echo "Gotowe. Sprawdź:  hostnamectl;  cat /etc/motd;  ssh <host> (baner)."
-echo "Odciski sprzętu VM (MAC, DMI) ustawia się w hiperwizorze — patrz REALIZM.md."
+echo "Odciski sprzętu VM (MAC, DMI) ustawia się w hiperwizorze, nie na tej maszynie."
