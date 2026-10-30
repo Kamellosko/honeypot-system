@@ -69,7 +69,7 @@ function summarize(r) {
   }
 
   if (r.source === "system" && r.operation === "heartbeat") {
-    return "<span class='sub'>sygnał życia</span>";
+    return "<span class='sub'>heartbeat</span>";
   }
 
   if (r.operation === "rename") {
@@ -194,8 +194,9 @@ async function refresh() {
   const agent = el("filter-agent").value;
   const limit = Number(el("filter-limit").value) || 100;
   const hideUnknown = el("hide-unknown").checked;
-  // Przy ukrywaniu szumu pobieramy więcej, żeby po odfiltrowaniu została pełna lista.
-  const fetchLimit = hideUnknown ? Math.min(limit * 5, 1000) : limit;
+  const hideHeartbeat = el("hide-heartbeat").checked;
+  // Przy ukrywaniu wierszy pobieramy więcej, żeby po odfiltrowaniu została pełna lista.
+  const fetchLimit = (hideUnknown || hideHeartbeat) ? Math.min(limit * 5, 1000) : limit;
   const query = new URLSearchParams();
   if (source) query.set("source", source);
   if (agent) query.set("agent_id", agent);
@@ -211,9 +212,14 @@ async function refresh() {
     renderStats(stats);
     renderAgents(agents);
     let shown = events;
-    if (hideUnknown) {
-      shown = events.filter((r) => r.analysis && r.analysis.classification &&
-        r.analysis.classification !== "unknown").slice(0, limit);
+    if (hideUnknown || hideHeartbeat) {
+      shown = events.filter((r) => {
+        if (r.error || r.complete === false) return true;   // luki w obserwacji zawsze widoczne
+        const c = r.analysis && r.analysis.classification;
+        if (hideHeartbeat && c === "heartbeat") return false;
+        if (hideUnknown && (!c || c === "unknown")) return false;
+        return true;
+      }).slice(0, limit);
     }
     renderEvents(shown);
     setConn(true, "Połączono");
@@ -236,6 +242,7 @@ el("filter-source").addEventListener("change", refresh);
 el("filter-agent").addEventListener("change", refresh);
 el("filter-limit").addEventListener("change", refresh);
 el("hide-unknown").addEventListener("change", refresh);
+el("hide-heartbeat").addEventListener("change", refresh);
 el("auto").addEventListener("change", scheduleAuto);
 el("drawer-close").addEventListener("click", closeDrawer);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
