@@ -1,8 +1,9 @@
-# API serwera (v1) — wersja po audycie
+# API serwera — wersja po audycie
 
 Zastępuje [api.md](api.md). Transport: **HTTPS** (TLS 1.2+), treść JSON. Serwer nasłuchuje
 na `127.0.0.1:8443`; z zewnątrz tylko przez tunel SSH. Agent wysyła **wszystkie** raporty na
-`POST /events`, endpointy `GET /api/v1/...` służą dashboardowi. API **nie ma uwierzytelniania**
+`POST /events` (ten sam odbiornik także jako `POST /api/events`), endpointy `GET /api/...`
+(bez wersji) służą dashboardowi. API **nie ma uwierzytelniania**
 (ochrona: bind na loopbacku i uprawnienia plików); każdy lokalny użytkownik, który zobaczy port,
 może czytać dane i wysyłać raporty.
 
@@ -53,7 +54,7 @@ zapamiętuje `report_id`, więc ponowna wysyłka zostanie zapisana. Serwer dokle
 ## 2. Lista agentów (serwer → dashboard)
 
 ```
-GET /api/v1/agents
+GET /api/agents
 ```
 
 Agenci wykrywani są dynamicznie z raportów. `status` to `online`, gdy ostatni raport dotarł w ciągu 90 s,
@@ -63,7 +64,7 @@ inaczej `offline`. Pola: `agent_id`, `status`, `last_seen`, `first_seen`, `total
 ## 3. Dziennik zdarzeń (serwer → dashboard)
 
 ```
-GET /api/v1/events?agent_id=&source=&limit=
+GET /api/events?agent_id=&source=&limit=
 ```
 
 Najnowsze pierwsze; `limit` ≥ 1 (dashboard domyślnie wysyła 100). Każdy element to pełny raport
@@ -73,10 +74,23 @@ z `event_id` i `received_at`. Uwaga: serwer czyta cały plik zdarzeń przy każd
 ## 4. Statystyki (serwer → dashboard)
 
 ```
-GET /api/v1/stats
+GET /api/stats
 ```
 
 Pola: `total_events`, `total_agents`, `online_agents`, `by_source`, `by_classification`, `by_operation`.
+
+## 5. Wykryci atakujący (serwer → dashboard)
+
+```
+GET /api/attackers
+```
+
+Zdalne IP z połączeń i nieudanych logowań, stopniowane po zachowaniu:
+`contact` → `suspicious` → `fast_enum` (≥10 zdarzeń/60 s) → `brute_force`
+(≥5 nieudanych logowań/10 min). Loopback pomijany. Pola: `ip`, `mac`, `threat`,
+`first_seen`, `last_seen`, `connections`, `auth_failures`, `events`,
+`failures_10m`, `events_1m`, `last_operation`. Szczegóły i progi:
+[`attacker-detection.md`](attacker-detection.md).
 
 ## Uwagi
 

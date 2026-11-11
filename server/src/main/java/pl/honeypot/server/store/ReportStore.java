@@ -4,8 +4,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +28,13 @@ public final class ReportStore {
 
     private static final Duration ONLINE_AFTER = Duration.ofSeconds(90);
 
+    // Attacker scoring windows. On this host nobody legitimate connects, so a
+    // remote IP seen here is hostile; these thresholds grade how hostile.
+    private static final Duration FAIL_WINDOW = Duration.ofMinutes(10);
+    private static final int FAIL_THRESHOLD = 5;            // brute force
+    private static final Duration ENUM_WINDOW = Duration.ofSeconds(60);
+    private static final int PORT_SCAN_THRESHOLD = 3;       // distinct local ports from one IP = scan
+
     public record InsertResult(long eventId, boolean duplicate) {
     }
 
@@ -39,7 +49,24 @@ public final class ReportStore {
         long totalReports;
     }
 
-    // Snapshot of an agent for GET /api/v1/agents.
+    // One attacker (a remote IP) with running counts and sliding-window buffers.
+    private static final class AttackerState {
+        String ip;
+        String mac;
+        String lastOperation;
+        Instant firstSeen;
+        Instant lastSeen;
+        long connections;
+        long authFailures;
+        long events;
+        final Deque<Instant> failTimes = new ArrayDeque<>();   // auth failures, pruned to FAIL_WINDOW
+        final Deque<Instant> eventTimes = new ArrayDeque<>();  // any events, pruned to ENUM_WINDOW
+        final Map<Integer, Instant> portTimes = new HashMap<>(); // distinct local ports, pruned to ENUM_WINDOW
+        boolean confirmed;        // successful login to a decoy account
+        boolean breadcrumbRead;   // read a file containing the breadcrumb marker
+    }
+
+    // Snapshot of an agent for GET /api/agents.
     public record AgentView(
             @JsonProperty("agent_id") String agentId,
             @JsonProperty("status") String status,
@@ -51,7 +78,7 @@ public final class ReportStore {
             @JsonProperty("last_classification") String lastClassification) {
     }
 
-    // Summary for GET /api/v1/stats.
+    // Summary for GET /api/stats.
     public record Stats(
             @JsonProperty("total_events") long totalEvents,
             @JsonProperty("total_agents") int totalAgents,
@@ -59,6 +86,24 @@ public final class ReportStore {
             @JsonProperty("by_source") Map<String, Long> bySource,
             @JsonProperty("by_classification") Map<String, Long> byClassification,
             @JsonProperty("by_operation") Map<String, Long> byOperation) {
+    }
+
+    // One attacker for GET /api/attackers.
+    public record AttackerView(
+            @JsonProperty("ip") String ip,
+            @JsonProperty("mac") String mac,
+            @JsonProperty("threat") String threat,         // contact|suspicious|fast_enum|brute_force
+            @JsonProperty("first_seen") String firstSeen,
+            @JsonProperty("last_seen") String lastSeen,
+            @JsonProperty("connections") long connections,
+            @JsonProperty("auth_failures") long authFailures,
+            @JsonProperty("events") long events,
+            @JsonProperty("failures_10m") int failures10m,
+            @JsonProperty("events_1m") int events1m,
+            @JsonProperty("distinct_ports") int distinctPorts,
+            @JsonProperty("confirmed") boolean confirmed,
+            @JsonProperty("breadcrumb_read") boolean breadcrumbRead,
+            @JsonProperty("last_operation") String lastOperation) {
     }
 
     private final JsonlLog log;
@@ -69,10 +114,21 @@ public final class ReportStore {
     private final Map<String, Long> bySource = new ConcurrentHashMap<>();
     private final Map<String, Long> byClassification = new ConcurrentHashMap<>();
     private final Map<String, Long> byOperation = new ConcurrentHashMap<>();
+    private final Map<String, AttackerState> attackers = new ConcurrentHashMap<>();
     private long totalEvents;
 
-    public ReportStore(JsonlLog log) {
+    // Successful login to one of these decoy accounts = confirmed attack (the
+    // passwords are not guessable). A log line whose content contains the marker
+    // flags breadcrumb_read on the reader's IP.
+    private static final java.util.regex.Pattern SSH_ACCEPTED = java.util.regex.Pattern.compile(
+            "Accepted (?:password|publickey) for (\\S+) from (\\d{1,3}(?:\\.\\d{1,3}){3})");
+    private final Set<String> confirmAccounts;
+    private final String breadcrumbMarker;
+
+    public ReportStore(JsonlLog log, Set<String> confirmAccounts, String breadcrumbMarker) {
         this.log = log;
+        this.confirmAccounts = confirmAccounts;
+        this.breadcrumbMarker = breadcrumbMarker;
         rebuild();
     }
 
@@ -117,12 +173,55 @@ public final class ReportStore {
         String classification = analysis != null ? text(analysis, "classification") : null;
         bump(byClassification, classification);
 
+        Instant parsed = parse(text(n, "received_at"));
+        final Instant at = parsed != null ? parsed : Instant.now();
+        String operation = text(n, "operation");
+
+        // Attacker from an observed inbound TCP connection (peer = the remote client).
+        JsonNode conn = n.get("connection");
+        if (conn != null) {
+            JsonNode peer = conn.get("peer");
+            if (peer != null) {
+                JsonNode lp = conn.get("local_port");
+                Integer port = lp != null && lp.canConvertToInt() ? lp.asInt() : null;
+                recordAttacker(text(peer, "ip"), text(peer, "mac"), at, false, port, operation);
+            }
+        }
+        // Attacker from a failed login (SSH and SMB both land here as authentication_failure).
+        if ("authentication_failure".equals(classification)) {
+            JsonNode nc = n.get("network_context");
+            JsonNode eps = nc != null ? nc.get("endpoints") : null;
+            if (eps != null && eps.isArray()) {
+                for (JsonNode ep : eps) {
+                    recordAttacker(text(ep, "ip"), text(ep, "mac"), at, true, null, operation);
+                }
+            }
+        }
+
+        // Confirmed login / breadcrumb read parsed from raw log content.
+        String content = text(n, "content");
+        if (content != null) {
+            var m = SSH_ACCEPTED.matcher(content);
+            while (m.find()) {
+                if (confirmAccounts.contains(m.group(1))) {
+                    markAttacker(m.group(2), at, true, false);
+                }
+            }
+            if (!breadcrumbMarker.isEmpty() && content.contains(breadcrumbMarker)) {
+                JsonNode nc2 = n.get("network_context");
+                JsonNode eps2 = nc2 != null ? nc2.get("endpoints") : null;
+                if (eps2 != null && eps2.isArray()) {
+                    for (JsonNode ep : eps2) {
+                        markAttacker(text(ep, "ip"), at, false, true);
+                    }
+                }
+            }
+        }
+
         String agentId = text(n, "agent_id");
         if (agentId == null) {
             return;
         }
-        Instant parsed = parse(text(n, "received_at"));
-        final Instant at = parsed != null ? parsed : Instant.now();
         AgentState a = agents.computeIfAbsent(agentId, k -> {
             AgentState s = new AgentState();
             s.agentId = k;
@@ -135,10 +234,129 @@ public final class ReportStore {
         if (a.lastSeen == null || !at.isBefore(a.lastSeen)) {
             a.lastSeen = at;
             a.lastSource = text(n, "source");
-            a.lastOperation = text(n, "operation");
+            a.lastOperation = operation;
             a.lastClassification = classification;
         }
         a.totalReports++;
+    }
+
+    // Records one attacker observation. Caller holds lock. Loopback is skipped so
+    // the agent's own upload/tunnel traffic on 127.0.0.1 is not counted.
+    private void recordAttacker(String ip, String mac, Instant at, boolean authFailure, Integer localPort, String op) {
+        if (isLoopback(ip)) {
+            return;
+        }
+        AttackerState s = attackers.computeIfAbsent(ip, k -> {
+            AttackerState a = new AttackerState();
+            a.ip = k;
+            a.firstSeen = at;
+            return a;
+        });
+        if (s.firstSeen == null || at.isBefore(s.firstSeen)) {
+            s.firstSeen = at;
+        }
+        if (s.lastSeen == null || !at.isBefore(s.lastSeen)) {
+            s.lastSeen = at;
+            s.lastOperation = op;
+        }
+        if (mac != null) {
+            s.mac = mac;
+        }
+        s.events++;
+        s.eventTimes.addLast(at);
+        pruneOlderThan(s.eventTimes, at.minus(ENUM_WINDOW));   // bounds the buffer to the window
+        if (authFailure) {
+            s.authFailures++;
+            s.failTimes.addLast(at);
+            pruneOlderThan(s.failTimes, at.minus(FAIL_WINDOW));
+        } else {
+            s.connections++;
+            if (localPort != null) {
+                s.portTimes.put(localPort, at);
+                s.portTimes.values().removeIf(t -> t.isBefore(at.minus(ENUM_WINDOW)));
+            }
+        }
+    }
+
+    // Flags an IP from content signals (confirmed login, breadcrumb read). Caller holds lock.
+    private void markAttacker(String ip, Instant at, boolean confirmed, boolean breadcrumb) {
+        if (isLoopback(ip)) {
+            return;
+        }
+        AttackerState s = attackers.computeIfAbsent(ip, k -> {
+            AttackerState a = new AttackerState();
+            a.ip = k;
+            a.firstSeen = at;
+            return a;
+        });
+        if (s.firstSeen == null || at.isBefore(s.firstSeen)) {
+            s.firstSeen = at;
+        }
+        if (s.lastSeen == null || !at.isBefore(s.lastSeen)) {
+            s.lastSeen = at;
+        }
+        if (confirmed) {
+            s.confirmed = true;
+        }
+        if (breadcrumb) {
+            s.breadcrumbRead = true;
+        }
+    }
+
+    // All attackers seen so far, most threatening first.
+    public List<AttackerView> attackers() {
+        Instant now = Instant.now();
+        List<AttackerView> out = new ArrayList<>();
+        synchronized (lock) {
+            for (AttackerState s : attackers.values()) {
+                int fails = countSince(s.failTimes, now.minus(FAIL_WINDOW));
+                int evs = countSince(s.eventTimes, now.minus(ENUM_WINDOW));
+                Instant portCut = now.minus(ENUM_WINDOW);
+                int ports = (int) s.portTimes.values().stream().filter(t -> !t.isBefore(portCut)).count();
+                String threat = s.confirmed ? "confirmed"
+                        : fails >= FAIL_THRESHOLD ? "brute_force"
+                        : ports >= PORT_SCAN_THRESHOLD ? "fast_enum"
+                        : (s.authFailures > 0 || s.breadcrumbRead) ? "suspicious" : "contact";
+                out.add(new AttackerView(s.ip, s.mac, threat, iso(s.firstSeen), iso(s.lastSeen),
+                        s.connections, s.authFailures, s.events, fails, evs, ports,
+                        s.confirmed, s.breadcrumbRead, s.lastOperation));
+            }
+        }
+        out.sort((x, y) -> {
+            int t = rank(y.threat()) - rank(x.threat());
+            return t != 0 ? t : y.lastSeen().compareTo(x.lastSeen());
+        });
+        return out;
+    }
+
+    private static int rank(String threat) {
+        return switch (threat) {
+            case "confirmed" -> 4;
+            case "brute_force" -> 3;
+            case "fast_enum" -> 2;
+            case "suspicious" -> 1;
+            default -> 0;
+        };
+    }
+
+    private static int countSince(Deque<Instant> q, Instant cutoff) {
+        int c = 0;
+        for (Instant i : q) {
+            if (!i.isBefore(cutoff)) {
+                c++;
+            }
+        }
+        return c;
+    }
+
+    private static void pruneOlderThan(Deque<Instant> q, Instant cutoff) {
+        while (!q.isEmpty() && q.peekFirst().isBefore(cutoff)) {
+            q.removeFirst();
+        }
+    }
+
+    private static boolean isLoopback(String ip) {
+        return ip == null || ip.equals("::1") || ip.startsWith("127.");
     }
 
     // Collected reports, newest first, optionally filtered and capped.

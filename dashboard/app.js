@@ -203,9 +203,9 @@ async function refresh() {
 
   try {
     const [stats, agents, events] = await Promise.all([
-      api("/api/v1/stats"),
-      api("/api/v1/agents"),
-      api("/api/v1/events?" + query.toString()),
+      api("/api/stats"),
+      api("/api/agents"),
+      api("/api/events?" + query.toString()),
     ]);
     if (!Array.isArray(agents) || !Array.isArray(events)) throw new Error("niepoprawna odpowiedź serwera");
     renderStats(stats);

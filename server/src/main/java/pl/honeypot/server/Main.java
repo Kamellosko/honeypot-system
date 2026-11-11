@@ -10,6 +10,7 @@ import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import pl.honeypot.server.api.AgentsHandler;
+import pl.honeypot.server.api.AttackersHandler;
 import pl.honeypot.server.api.EventsQueryHandler;
 import pl.honeypot.server.api.ReportHandler;
 import pl.honeypot.server.api.StatsHandler;
@@ -26,7 +27,8 @@ public final class Main {
 
         // Every agent report lands in data/events.jsonl, deduplicated by report_id.
         ReportStore reports = new ReportStore(
-                new JsonlLog(cfg.dataDir().resolve("events.jsonl"), mapper, "event_id"));
+                new JsonlLog(cfg.dataDir().resolve("events.jsonl"), mapper, "event_id"),
+                cfg.confirmAccounts(), cfg.breadcrumbMarker());
 
         boolean serveDashboard = Files.isDirectory(cfg.dashboardDir());
 
@@ -57,13 +59,18 @@ public final class Main {
             }
         });
 
-        // Agent -> server (the agent posts every report here).
-        app.post("/events", new ReportHandler(reports, cfg.port()));
+        // Agent -> server. The frozen agent posts to /events (hardcoded in the C
+        // agent's port.c), so that path stays; /api/events is the same ingress
+        // under the unified /api/* namespace.
+        ReportHandler ingest = new ReportHandler(reports, cfg.port());
+        app.post("/events", ingest);
+        app.post("/api/events", ingest);
 
         // Server -> operator (read-only views for the dashboard).
-        app.get("/api/v1/agents", new AgentsHandler(reports));
-        app.get("/api/v1/events", new EventsQueryHandler(reports));
-        app.get("/api/v1/stats", new StatsHandler(reports));
+        app.get("/api/agents", new AgentsHandler(reports));
+        app.get("/api/events", new EventsQueryHandler(reports));
+        app.get("/api/stats", new StatsHandler(reports));
+        app.get("/api/attackers", new AttackersHandler(reports));
 
         app.start();
     }

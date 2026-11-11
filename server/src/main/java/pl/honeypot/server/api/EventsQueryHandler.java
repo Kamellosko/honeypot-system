@@ -5,7 +5,7 @@ import io.javalin.http.Context;
 import io.javalin.http.Handler;
 import pl.honeypot.server.store.ReportStore;
 
-// GET /api/v1/events - collected reports, newest first.
+// GET /api/events - collected reports, newest first.
 // Optional query params: agent_id, source (share|log|network|system) and limit.
 public final class EventsQueryHandler implements Handler {
 

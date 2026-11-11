@@ -2,7 +2,7 @@
 
 Odbiornik raportów honeypota: przyjmuje raporty agenta C po **HTTPS**
 (`POST /events`), zapisuje je do `data/events.jsonl` (deduplikacja po
-`report_id`) i udostępnia dashboardowi widoki tylko do odczytu pod `/api/v1/*`.
+`report_id`) i udostępnia dashboardowi widoki tylko do odczytu pod `/api/*`.
 Może też serwować sam dashboard z katalogu `../dashboard` (ten sam origin, bez
 CORS).
 
@@ -38,7 +38,7 @@ Szybki test bez agenta:
 curl --cacert certs/ca.crt -X POST https://127.0.0.1:8443/events \
   -H 'Content-Type: application/json' \
   --data @examples/report-file-change.json
-curl --cacert certs/ca.crt https://127.0.0.1:8443/api/v1/stats
+curl --cacert certs/ca.crt https://127.0.0.1:8443/api/stats
 ```
 
 ## Uruchomienie agenta (kod C bez zmian)
@@ -119,7 +119,8 @@ dzienniku: `network/tcp_connection_observed`, `share/create`, `log/...`).
 
 Pełny opis: [`docs/api.md`](docs/api.md). Skrót:
 
-- `POST /events` — agent wysyła tu każdy raport (schema_version 1).
-- `GET /api/v1/agents` — agenci + liveness.
-- `GET /api/v1/events?agent_id=&source=&limit=` — zdarzenia, najnowsze pierwsze.
-- `GET /api/v1/stats` — liczniki zbiorcze.
+- `POST /events` — agent wysyła tu każdy raport (schema_version 1); także jako `POST /api/events`.
+- `GET /api/agents` — agenci + liveness.
+- `GET /api/events?agent_id=&source=&limit=` — zdarzenia, najnowsze pierwsze.
+- `GET /api/stats` — liczniki zbiorcze.
+- `GET /api/attackers` — wykryci atakujący (patrz `docs/attacker-detection.md`).

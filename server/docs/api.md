@@ -1,8 +1,10 @@
-# API serwera (v1)
+# API serwera
 
 Transport: **HTTPS** (TLS wymagany). Treść JSON (`Content-Type: application/json`).
-Agent inicjuje każde połączenie i wysyła **wszystkie** raporty na jeden endpoint
-(`POST /events`). Endpointy odczytu (`/api/v1/...`) służą dashboardowi.
+Agent inicjuje każde połączenie i wysyła **wszystkie** raporty na jeden endpoint.
+Zamrożony agent puka na `POST /events` (ścieżka zahardkodowana w jego kodzie);
+ten sam odbiornik jest dostępny też jako `POST /api/events`. Endpointy odczytu
+(`/api/...`, bez wersji) służą dashboardowi.
 
 Agent weryfikuje łańcuch TLS oraz adres/host odbiornika w SAN certyfikatu i nie da
 się tego wyłączyć po stronie agenta. Certyfikat musi być zaufany przez agenta
@@ -59,7 +61,7 @@ kolejce agenta. Serwer dokleja własne `event_id` i `received_at`.
 ## 2. Lista agentów (serwer → dashboard)
 
 ```
-GET /api/v1/agents
+GET /api/agents
 ```
 
 Agenci wykrywani są dynamicznie z napływających raportów (brak provisioningu).
@@ -86,7 +88,7 @@ Agenci wykrywani są dynamicznie z napływających raportów (brak provisioningu
 ## 3. Dziennik zdarzeń (serwer → dashboard)
 
 ```
-GET /api/v1/events
+GET /api/events
 ```
 
 Zwraca zapisane raporty, najnowsze pierwsze. Parametry (opcjonalne):
@@ -104,7 +106,7 @@ Każdy element to pełny raport agenta wzbogacony o `event_id` i `received_at`.
 ## 4. Statystyki (serwer → dashboard)
 
 ```
-GET /api/v1/stats
+GET /api/stats
 ```
 
 ```json
@@ -116,6 +118,30 @@ GET /api/v1/stats
   "by_classification": { "file_change": 25, "tcp_connection": 8 },
   "by_operation": { "create": 20, "heartbeat": 4 }
 }
+```
+
+---
+
+## 5. Wykryci atakujący (serwer → dashboard)
+
+```
+GET /api/attackers
+```
+
+Zdalne IP widziane w połączeniach i nieudanych logowaniach, stopniowane po
+zachowaniu (`contact` / `suspicious` / `fast_enum` / `brute_force`). Na tym hoście
+nikt z firmy się nie łączy, więc każde IP tu to atakujący. Szczegóły działania i
+progi: [`attacker-detection.md`](attacker-detection.md).
+
+```json
+[
+  {
+    "ip": "10.13.37.66", "mac": "00:0c:29:ab:cd:ef", "threat": "brute_force",
+    "first_seen": "2026-11-11T12:51:25Z", "last_seen": "2026-11-11T12:51:25Z",
+    "connections": 0, "auth_failures": 5, "events": 5,
+    "failures_10m": 5, "events_1m": 5, "last_operation": "append"
+  }
+]
 ```
 
 ---
