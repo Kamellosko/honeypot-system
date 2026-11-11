@@ -13,7 +13,7 @@ atakujący ─SMB/SSH─► Samba (/srv/samba/*, logi w /var/log/samba)
                          ▼
                   SERWER sysmon-collector (Java)
                    dedup → /var/lib/sysmon/events.jsonl
-                   API /api/v1/* → DASHBOARD (przeglądarka, tunel SSH)
+                   API /api/* → DASHBOARD (przeglądarka, tunel SSH)
 ```
 
 ---
@@ -100,7 +100,7 @@ Tylko HTTPS, nasłuch na `127.0.0.1:8443`. Agentów nie trzeba rejestrować — 
 
 Reszta raportu (diffy, logi, połączenia) jest zapisywana bez interpretacji.
 
-### API odczytu (`/api/v1/*`, bez uwierzytelniania)
+### API odczytu (`/api/*`, bez uwierzytelniania)
 
 | Endpoint | Zwraca |
 |---|---|

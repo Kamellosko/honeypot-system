@@ -138,7 +138,7 @@ Sprawdź:
 
 ```bash
 systemctl status sysmon-collector --no-pager
-curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/v1/stats
+curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/stats
 ```
 
 Ma być `active (running)` i JSON z licznikami (same zera to normalne; dziwne znaki po JSON-ie to tylko artefakt terminala).
@@ -191,7 +191,7 @@ sudo ls /var/lib/sys-auditd/            # snapshots  pending
 Po około minucie agent ma być widoczny jako online:
 
 ```bash
-curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/v1/agents | jq .
+curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/agents | jq .
 sudo ls /var/lib/sys-auditd/pending | wc -l          # ma być 0 (pusta kolejka)
 ```
 
@@ -271,4 +271,4 @@ Zostaw to okno otwarte, w przeglądarce wejdź na `https://127.0.0.1:8443/` i za
 | Raporty w `*.rejected` | niepoprawny `AGENT_ID` albo zła koperta, zob. `server/docs/api.md` |
 | TLS: błąd certyfikatu | `ls /etc/pki/ca-trust/source/anchors/`, SAN musi zawierać `127.0.0.1`: `./scripts/gen-certs.sh IP:127.0.0.1`, potem `install-server-service.sh` |
 | Samba: brak logowania | `testparm -s`, `getenforce`, `sudo restorecon -R /srv/samba` |
-| Dashboard pusty | tunel SSH działa? `curl --cacert ... /api/v1/events?limit=5` na Almie |
+| Dashboard pusty | tunel SSH działa? `curl --cacert ... /api/events?limit=5` na Almie |

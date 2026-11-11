@@ -36,7 +36,7 @@ smbclient //<IP_H>/Dokumenty -U jkowalski%'<haslo1>' -c ls # logowanie OK
 smbclient //<IP_H>/Dokumenty -U jkowalski%zle -c ls        # → authentication_failure
 ```
 Na H: `testparm -s`, `systemctl status smb nmb`, `firewall-cmd --list-all` (bez 8443).
-W API (przez tunel/na H): `curl --cacert certs/ca.crt https://127.0.0.1:8443/api/v1/events?limit=10`.
+W API (przez tunel/na H): `curl --cacert certs/ca.crt https://127.0.0.1:8443/api/events?limit=10`.
 
 ## 5. Zostaje do zrobienia ręcznie
 - [ ] Hiperwizor: MAC producenta zwykłego sprzętu, ciągi DMI (patrz `REALIZM.md`).

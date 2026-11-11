@@ -27,7 +27,7 @@ zamienia w raport JSON, zapisuje go trwale na dysku, a potem wysyła HTTPS-em do
                         │                                   │ 127.0.0.1:8443         │
                         │ sysmon-collector (Java, user sysmon)◄┘                     │
                         │   ├─ dedup po report_id ─► /var/lib/sysmon/events.jsonl    │
-                        │   └─ /api/v1/{agents,events,stats} + dashboard (statyczny) │
+                        │   └─ /api/{agents,events,stats} + dashboard (statyczny) │
                         └────────────────────────────────────────────────────────────┘
         dashboard: tylko przez tunel SSH (ssh -L 8443:127.0.0.1:8443)
         kopia dowodów poza maszynę: sync-events.sh (rsync po SSH, cron)
@@ -334,8 +334,9 @@ Skutki: awaria serwera nie gubi danych (kolejka rośnie do 10 000); dostawa to *
   Zapis jest pierwszy, dopiero potem raport trafia do zbioru „widziane" — nieudany zapis nie zamieni ponowienia w „duplikat".
 - **Liczniki w pamięci** (`ReportStore`): stan agentów (first/last seen, ostatnie source/operation/classification, liczba raportów),
   zliczenia `by_source`, `by_operation`, `by_classification`. „online" = ostatni raport < 90 s temu **wg czasu serwera** (`received_at`).
-- **API odczytu** (bez uwierzytelniania): `GET /api/v1/agents`, `GET /api/v1/events?agent_id=&source=&limit=` (od najnowszych
-  wg kolejności zapisu), `GET /api/v1/stats`. Dashboard jest serwowany z tego samego origin (`dashboard.dir`).
+- **API odczytu** (bez uwierzytelniania): `GET /api/agents`, `GET /api/events?agent_id=&source=&limit=` (od najnowszych
+  wg kolejności zapisu), `GET /api/stats`, `GET /api/attackers` (wykryci atakujący, stopniowani po zachowaniu —
+  patrz `server/docs/attacker-detection.md`). Dashboard jest serwowany z tego samego origin (`dashboard.dir`).
 
 ---
 
@@ -400,7 +401,7 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
 6. **Serwer bez uwierzytelniania**: każdy, kto dotrze do `127.0.0.1:8443` (czyli atakujący z shellem na H), może wstrzyknąć fałszywe raporty
    i czytać wszystko przez API (raporty zawierają treść plików i logów). Zewnętrznie chroni tylko bind na loopback i brak reguły w firewallu.
    Projekt (`projekt_honeypot.md`) przewiduje token / mTLS, ale nie jest to zaimplementowane.
-7. **Skalowanie serwera**: każde zapytanie `GET /api/v1/events` czyta i parsuje **cały** `events.jsonl`; dashboard robi to co 4 s.
+7. **Skalowanie serwera**: każde zapytanie `GET /api/events` czyta i parsuje **cały** `events.jsonl`; dashboard robi to co 4 s.
    Przy dużym ruchu logów (jedna linia = jeden raport) plik szybko rośnie. Zbiór `report_id` też rośnie w pamięci bez limitu.
 8. **Niezgodność walidacji ID**: agent dopuszcza `--id` do 128 znaków ASCII, serwer tylko `[A-Za-z0-9._-]{1,64}`. Inny ID → 400 → wszystkie raporty
    lądują jako `.rejected`. Domyślne `fs01`/`alma10-01` są poprawne.
@@ -450,8 +451,8 @@ systemctl status sys-auditd sysmon-collector smb nmb          # wszystko active
 ls /var/lib/sys-auditd/pending | wc -l                          # kolejka (powinna być ~0)
 ls /var/lib/sys-auditd/pending | grep -c rejected               # raporty odrzucone na stałe (powinno być 0)
 tail -n 3 /var/lib/sysmon/events.jsonl | jq -c '{event_id,source,operation,analysis,error}'
-curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/v1/stats
-curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/v1/agents
+curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/stats
+curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/agents
 # test jednego scenariusza z zewnątrz:
 smbclient //<IP_H>/Dokumenty -U jkowalski%zle -c ls            # → sprawdź w log.smbd i w raporcie (13.1 pkt 1 i 3)
 smbclient //<IP_H>/Dokumenty -U jkowalski%'<haslo>' -c 'put x.txt'   # → share/create

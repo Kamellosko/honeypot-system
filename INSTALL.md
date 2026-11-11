@@ -111,7 +111,7 @@ Sprawdź:
 
 ```bash
 systemctl status sysmon-collector --no-pager
-curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/v1/stats
+curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/stats
 ```
 
 Ma wrócić JSON z licznikami (same zera to normalne).
@@ -158,7 +158,7 @@ sudo ls /var/lib/sys-auditd/            # snapshots  pending
 Po około minucie agent powinien być widoczny jako online:
 
 ```bash
-curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/v1/agents | jq .
+curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/agents | jq .
 ```
 
 Jeśli `make release` się nie zbuduje, zapisz pełny komunikat błędu (typowo brak `libtdb-devel` albo `curl-devel`).
@@ -226,4 +226,4 @@ Zostaw to okno otwarte, w przeglądarce wejdź na `https://127.0.0.1:8443/` i za
 | TLS: błąd certyfikatu | CA zaufane? `ls /etc/pki/ca-trust/source/anchors/`, SAN musi zawierać `127.0.0.1`: `./scripts/gen-certs.sh IP:127.0.0.1`, potem `install-server-service.sh` |
 | Samba: brak logowania | `testparm -s`, `getenforce`, `sudo restorecon -R /srv/samba` |
 | Agent nie widzi udziału | `testparm -s`, ścieżki bez symlinków, `systemctl status smb` |
-| Dashboard pusty | tunel SSH działa? `curl --cacert ... /api/v1/events?limit=5` na Almie |
+| Dashboard pusty | tunel SSH działa? `curl --cacert ... /api/events?limit=5` na Almie |
