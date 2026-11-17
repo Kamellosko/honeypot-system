@@ -138,7 +138,7 @@ Sprawdź:
 
 ```bash
 systemctl status sysmon-collector --no-pager
-curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/v1/stats
+curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/stats
 ```
 
 Ma być `active (running)` i JSON z licznikami (same zera to normalne; dziwne znaki po JSON-ie to tylko artefakt terminala).
@@ -157,6 +157,12 @@ sudo HP_HOSTNAME=fs01 HP_DOMAIN=firma.local ./scripts/setup-persona.sh
 ```
 
 Otwórz nowy terminal albo wpisz `exec bash`: prompt ma pokazywać `fs01`.
+
+**Wariant „Dział Finansów" (zamiast dwóch skryptów powyżej):** `samba_structure/setup-honeypot.sh` stawia inną personę
+(udziały `Wspolny`, `Finanse`, `Archiwum$`, `Zarzad`, `full_audit`, konto-przynęta `backup_srv` z okruszkiem). Skopiuj
+`samba_structure/honeypot.conf.example` do `samba_structure/honeypot.conf`, uzupełnij hasła i klucz administratora, potem
+`sudo ./samba_structure/setup-honeypot.sh`. **Nie uruchamiaj obu wariantów:** oba nadpisują `smb.conf`, nazwę hosta i MOTD.
+Opis decyzji: [`samba_structure/ustalenia-konfiguracja.md`](samba_structure/ustalenia-konfiguracja.md).
 
 Panel `cockpit` (port 9090) nie pasuje do wabika, wyłącz go:
 
@@ -197,7 +203,7 @@ sudo ls /var/lib/sys-auditd/            # snapshots  pending
 Po około minucie agent ma być widoczny jako online:
 
 ```bash
-curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/v1/agents | jq .
+curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/agents | jq .
 sudo ls /var/lib/sys-auditd/pending | wc -l          # ma być 0 (pusta kolejka)
 ```
 
@@ -262,6 +268,7 @@ Zostaw to okno otwarte, w przeglądarce wejdź na `https://127.0.0.1:8443/` i za
 
 - **Kopia logu poza maszynę** (żeby przejęcie wabika nie skasowało dowodów):
   `sudo REMOTE=user@host:/sciezka/ ./scripts/sync-events.sh` i wpis w cronie co 10 minut.
+- **Wygląd serwera (po testach):** `sudo ./scripts/setup-realism.sh` przez SSH wyłącza GNOME, ukrywa procesy innych użytkowników (`hidepid`), czyści swap i ukrywa MAC w adresie IPv6. Potem `sudo reboot`. Opcje i wycofanie są w nagłówku skryptu.
 - **Izolacja:** po instalacji możesz odłączyć Adapter 1 (NAT) w Almie.
 - **Realizm VM:** MAC i ciągi DMI ustawia się w VirtualBoxie (`VBoxManage modifyvm ... --macaddress1`, `VBoxManage setextradata ... DmiSystemVendor`).
 
@@ -277,4 +284,4 @@ Zostaw to okno otwarte, w przeglądarce wejdź na `https://127.0.0.1:8443/` i za
 | Raporty w `*.rejected` | niepoprawny `AGENT_ID` albo zła koperta, zob. `server/docs/api.md` |
 | TLS: błąd certyfikatu | `ls /etc/pki/ca-trust/source/anchors/`, SAN musi zawierać `127.0.0.1`: `./scripts/gen-certs.sh IP:127.0.0.1`, potem `install-server-service.sh` |
 | Samba: brak logowania | `testparm -s`, `getenforce`, `sudo restorecon -R /srv/samba` |
-| Dashboard pusty | tunel SSH działa? `curl --cacert ... /api/v1/events?limit=5` na Almie |
+| Dashboard pusty | tunel SSH działa? `curl --cacert ... /api/events?limit=5` na Almie |

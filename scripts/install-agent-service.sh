@@ -52,7 +52,7 @@ if [ -f "$CA_FILE" ]; then
 fi
 
 echo ">> Sprawdzenie zaufania do CA serwera (łączność TLS)"
-if ! curl -sf "https://$SERVER_IP:$SERVER_PORT/api/v1/stats" >/dev/null; then
+if ! curl -sf "https://$SERVER_IP:$SERVER_PORT/api/stats" >/dev/null; then
   echo "UWAGA: nie udało się połączyć TLS z https://$SERVER_IP:$SERVER_PORT" >&2
   echo "       Upewnij się, że CA jest zaufane (update-ca-trust) i serwer działa." >&2
   echo "       Kontynuuję — agent i tak będzie ponawiał dostawy." >&2
@@ -83,4 +83,4 @@ systemctl --no-pager status sys-auditd || true
 
 echo
 echo "Gotowe. Agent '$AGENT_ID' wstaje automatycznie po boocie i restartuje się po awarii."
-echo "Weryfikacja na S:  /api/v1/agents powinno pokazać '$AGENT_ID' online (po ~minucie heartbeat)."
+echo "Weryfikacja na S:  /api/agents powinno pokazać '$AGENT_ID' online (po ~minucie heartbeat)."

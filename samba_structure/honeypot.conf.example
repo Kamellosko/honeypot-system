@@ -1,0 +1,42 @@
+# honeypot.conf — wszystkie wartości konfiguracji honeypota (Dział Finansów).
+# Czytane przez setup-honeypot.sh.  UWAGA: zawiera hasła — NIE commitować.
+# Do repo trafia tylko honeypot.conf.example (bez haseł).  Składnia: zmienne bash.
+
+## 1. Tożsamość serwera
+HP_HOSTNAME="fs-finanse"
+HP_COMPANY=""                                  # UZUPEŁNIJ: nazwa firmy (server string, MOTD)
+HP_SERVER_STRING="Serwer plikow - Dzial Finansow"
+HP_WORKGROUP="FIRMA"
+HP_TIMEZONE="Europe/Warsaw"
+HP_LOCALE="pl_PL.UTF-8"
+
+## 2. Konta
+# Prawdziwy admin — key-only SSH, NIE przynęta (zarządzanie + tunel do dashboardu).
+HP_ADMIN_USER="svc-admin"
+HP_ADMIN_PUBKEY=""
+
+# Konto SSH-shell (przynęta). Hasło = okruszek w Archiwum$ — musi tu pasować.
+HP_SHELL_DECOY_USER="backup_srv"
+HP_SHELL_DECOY_PASS=""
+
+# Konta tylko-Samba:  "login|pelna nazwa (GECOS)|haslo"  — UZUPEŁNIJ hasła (wiarygodne, nie-rockyou).
+HP_SAMBA_USERS=(
+  "a.kowalska|Anna Kowalska - Glowna ksiegowa|"
+  "m.nowak|Marek Nowak - Specjalista ds. finansow|"
+  "k.wisniewska|Katarzyna Wisniewska - Analityk finansowy|"
+  "p.zielinski|Piotr Zielinski - Ksiegowy|"
+  "administrator|Konto administracyjne|"
+)
+
+## 3. Samba
+HP_SMB_BASE="/srv/samba"
+HP_SMB_GROUP="finanse"                          # grupa z dostępem do udziału Finanse/Archiwum$
+HP_AUDIT_LOG="/var/log/samba/audit.log"         # tu kierujemy full_audit (agent to czyta)
+HP_ENABLE_WSDD="yes"                            # WS-Discovery (pakiet wsdd, zwykle z EPEL)
+
+## 7. Historia logowań (tylko UDANE; konta z powłoką: svc-admin, backup_srv)
+HP_LOGIN_HISTORY_IPS=( "10.0.0.15" "10.0.0.23" "10.0.0.8" )   # UZUPEŁNIJ: wewnętrzne IP (stacje IT / backup)
+
+## 6. Okruszek — hosty wskazywane w .bash_history / known_hosts backup_srv (nieistniejące)
+HP_FAKE_DB_HOST="db-fin01"
+HP_FAKE_BACKUP_HOST="nas-arch01"

@@ -4,7 +4,7 @@ import io.javalin.http.Context;
 import io.javalin.http.Handler;
 import pl.honeypot.server.store.ReportStore;
 
-// GET /api/v1/stats - headline counters for the dashboard.
+// GET /api/stats - headline counters for the dashboard.
 public final class StatsHandler implements Handler {
 
     private final ReportStore reports;
