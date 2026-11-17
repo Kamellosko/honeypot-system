@@ -1,145 +1,87 @@
 # API serwera (v1)
 
-Transport: HTTP, treść JSON (`Content-Type: application/json`). Wszystkie połączenia
-inicjuje agent. Prefiks ścieżek: `/api/v1`.
+Transport: **HTTPS** (TLS 1.2+), treść JSON. Serwer nasłuchuje
+na `127.0.0.1:8443`; z zewnątrz tylko przez tunel SSH. Agent wysyła **wszystkie** raporty na
+`POST /events`, endpointy `GET /api/v1/...` służą dashboardowi. API **nie ma uwierzytelniania**
+(ochrona: bind na loopbacku i uprawnienia plików); każdy lokalny użytkownik, który zobaczy port,
+może czytać dane i wysyłać raporty.
 
-Sensor musi wcześniej istnieć w tabeli `sensors`. Nieznany `sensor_id` daje `404`.
+Agent weryfikuje łańcuch TLS i adres w SAN certyfikatu (nie da się tego wyłączyć). Certyfikat
+tworzy `server/scripts/gen-certs.sh` (SAN domyślnie `IP:127.0.0.1`), a CA musi być w magazynie
+zaufania systemu (`/etc/pki/ca-trust/source/anchors/sysmon-ca.crt`).
 
----
-
-## 1. Pobranie konfiguracji
-
-Agent wysyła to zapytanie przy starcie, zanim otworzy porty-wabiki.
+## 1. Zgłoszenie raportu (agent → serwer)
 
 ```
-GET /api/v1/config/{sensor_id}
+POST /events        Content-Type: application/json        (do 32 MB)
 ```
 
-**200 OK**
-```json
-{
-  "sensor_id": "sensor-01",
-  "port_count": 4,
-  "timeout_sec": 5,
-  "heartbeat_sec": 30,
-  "srv_port": 8000,
-  "ports": "22,23,80,2222"
-}
-```
+Wspólna koperta:
 
 | Pole | Typ | Opis |
 |------|-----|------|
-| `sensor_id` | string | ID honeypota |
-| `port_count` | int | liczba portów w `ports`, przydatna do alokacji tablicy w C |
-| `timeout_sec` | int | timeout gniazda (`SO_RCVTIMEO`) |
-| `heartbeat_sec` | int | interwał heartbeatu |
-| `srv_port` | int | port serwera, na który agent wysyła raporty |
-| `ports` | string | numery portów-wabików oddzielone przecinkami, bez spacji, rosnąco |
+| `schema_version` | int | zawsze `1` |
+| `report_id` | string | 64 znaki hex (lowercase), unikalny; transmisja bywa ponawiana |
+| `agent_id` | string | `[A-Za-z0-9._-]`, 1–64 znaków |
+| `observed_at` | string | czas zdarzenia UTC, `YYYY-MM-DDTHH:MM:SSZ` |
+| `source` | string | `share` \| `log` \| `network` \| `system` \| `monitor` \| `source` |
+| `operation` | string | `[a-z0-9_]`, 1–64 znaków, np. `create_delete`, `append`, `tcp_connection_observed`, `observation_gap`, `heartbeat` |
+| `path` | string \| null | ścieżka; `null` + `path_base64` gdy nazwa nie jest poprawnym UTF-8 |
+| `analysis` | object | `{ "classification": ..., "actor": null }` |
+| `complete` | bool | czy raport jest kompletny |
+| `error` | string \| null | przyczyna niekompletności |
 
-**404** – nieznany sensor.
+Pola zależne od typu: `metadata`, `content_changes`, `evidence[]`, `connection{}`,
+`previous_path`, `content` / `content_base64`, `network_context`. Przykłady: `examples/report-*.json`.
+Źródłem prawdy o schemacie jest kod agenta (`agent/src/snapshot.c`, `network.c`, `heartbeat.c`).
 
----
+**Odpowiedzi**
 
-## 2. Zgłoszenie próby połączenia
+| Kod | Treść | Znaczenie dla agenta |
+|-----|-------|----------------------|
+| `201` | `{"event_id": N, "report_id": "..."}` | zapisany (na dysku, `fsync`) — agent kasuje z kolejki |
+| `200` | `{"report_id": "...", "duplicate": true}` | ten `report_id` już był — agent kasuje |
+| `200` | `{"report_id": "...", "ignored": true}` | własne połączenie agenta z serwerem na loopbacku (zapobiega pętli zwrotnej); nie zapisano — agent kasuje |
+| `400` | błąd | zły JSON albo zła koperta (`schema_version`, `report_id`, `agent_id`, `source`, `operation`, `analysis.classification` `[A-Za-z0-9_.-]`, 1–64 znaki) albo więcej niż 1000 różnych `agent_id` — agent **przenosi raport do `*.rejected`** i wysyła następne |
+| `413` | błąd | raport > 64 MB — jak wyżej |
+| `5xx` | błąd | chwilowy problem — agent ponawia ten sam raport |
 
-```
-POST /api/v1/events
-```
+Serwer odpowiada 2xx dopiero po zapisie. Przy błędzie zapisu (np. brak miejsca) odpowiada 500 i **nie**
+zapamiętuje `report_id`, więc ponowna wysyłka zostanie zapisana. Serwer dokleja `event_id` i `received_at`
+(czas serwera; używany też do oceny, czy agent jest `online`).
 
-```json
-{
-  "sensor_id": "sensor-01",
-  "state": "handling_conn",
-  "mac": "02:42:ac:12:00:05",
-  "src_ip": "172.18.0.5"
-}
-```
-
-| Pole | Typ | Wymagane | Opis |
-|------|-----|:--------:|------|
-| `sensor_id` | string | tak | ID honeypota |
-| `state` | string | tak | stan agenta: `init`, `idle`, `handling_conn`, `shutdown`, `error` |
-| `mac` | string \| null | nie | MAC atakującego, `aa:bb:cc:dd:ee:ff` (wielkość liter dowolna) |
-| `src_ip` | string \| null | nie (zalecane) | IP atakującego |
-
-**201 Created** → `{"event_id": 42}`
-**400** – błędne pole. **404** – nieznany sensor.
-
-Serwer sam nadaje czas odbioru (`received_at`).
-
----
-
-## 3. Heartbeat
-
-Agent wysyła go co `heartbeat_sec` sekund (z konfiguracji).
+## 2. Lista agentów (serwer → dashboard)
 
 ```
-POST /api/v1/heartbeat
+GET /api/v1/agents
 ```
 
-```json
-{
-  "sensor_id": "sensor-01",
-  "events_since_last": 0,
-  "uptime_sec": 86400
-}
-```
+Agenci wykrywani są dynamicznie z raportów. `status` to `online`, gdy ostatni raport dotarł w ciągu 90 s,
+inaczej `offline`. Pola: `agent_id`, `status`, `last_seen`, `first_seen`, `total_reports`,
+`last_source`, `last_operation`, `last_classification`.
 
-| Pole | Typ | Wymagane | Opis |
-|------|-----|:--------:|------|
-| `sensor_id` | string | tak | ID honeypota |
-| `events_since_last` | int | tak | liczba zdarzeń od poprzedniego heartbeatu (≥ 0) |
-| `uptime_sec` | int | tak | czas działania agenta w sekundach (≥ 0) |
-
-**204 No Content**, bez treści.
-**400** – błędne pole. **404** – nieznany sensor.
-
-Serwer zapisuje wiersz w `heartbeats` i odświeża `sensors.last_seen` oraz `status = online`.
-
----
-
-## 4. Raport błędu
-
-Drugi typ wiadomości od agenta — zgłoszenie usterki (odpowiada stanowi `STATE_ERROR`).
+## 3. Dziennik zdarzeń (serwer → dashboard)
 
 ```
-POST /api/v1/errors
+GET /api/v1/events?agent_id=&source=&limit=
 ```
 
-```json
-{
-  "sensor_id": "sensor-01",
-  "state": "error",
-  "error_id": 2
-}
+Najnowsze pierwsze; `limit` ≥ 1, domyślnie 100, maksymalnie 1000 (większa wartość jest obcinana do 1000).
+Każdy element to pełny raport z `event_id` i `received_at`. Serwer czyta plik zdarzeń od końca i
+zatrzymuje się po `limit` pasujących raportach, więc koszt nie zależy od rozmiaru całego pliku.
+
+## 4. Statystyki (serwer → dashboard)
+
+```
+GET /api/v1/stats
 ```
 
-| Pole | Typ | Wymagane | Opis |
-|------|-----|:--------:|------|
-| `sensor_id` | string | tak | ID honeypota |
-| `state` | string | tak | stan agenta w chwili błędu (ten sam zbiór co w zdarzeniu) |
-| `error_id` | int | tak | kod błędu nadawany przez agenta (katalog do ustalenia z osobą A) |
-
-**201 Created** → `{"report_id": 7}`
-**400** – błędne pole. **404** – nieznany sensor.
-
----
-
-## Planowane (kolejne fazy)
-
-| Endpoint | Faza | Opis |
-|----------|------|------|
-| `GET /api/v1/sensors` | 1 | dla dashboardu: lista sensorów, `status`, `last_seen` |
-| `GET /api/v1/events` | 1 | dla dashboardu: oś czasu zdarzeń |
-| `GET /api/v1/ioc` | 3 | lista blokad dla agenta |
-
----
+Pola: `total_events`, `total_agents`, `online_agents`, `by_source`, `by_classification`, `by_operation`.
+W `by_classification` i `by_operation` jest najwyżej 200 różnych kluczy, dalsze nowe wartości liczą się pod `other`.
 
 ## Uwagi
 
-- **MAC przechodzi tylko w obrębie jednej sieci L2.** Gdy atakujący jest za routerem, czyli
-  w każdym ataku z internetu, agent zobaczy MAC routera lub bramy, a nie atakującego. Dlatego
-  `mac` jest opcjonalne, a `src_ip` zalecane. W labie dockerowym (jedna sieć bridge) MAC będzie
-  prawdziwy. Agent może go odczytać z `/proc/net/arp` po IP z `getpeername()`.
-- `GET /config` zastępuje `POST /register` z `projekt_honeypot.md`. Pobranie konfiguracji
-  oznacza sensor jako `online`.
+- Pliki zdarzeń: `/var/lib/sysmon/events.jsonl` (`0600`). Zawierają treść plików i logów.
+- **MAC przechodzi tylko w obrębie jednej sieci L2.** Dla napastnika zza routera `peer.mac` bywa `null`
+  z `mac_status` wyjaśniającym powód.
+- Deduplikacja po `report_id` jest po stronie serwera; agent może słać duplikaty.

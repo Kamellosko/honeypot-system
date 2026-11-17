@@ -1,43 +1,58 @@
-# honeypot-server
+# Serwer (kolektor + dashboard)
 
-Centralny serwer (kolektor + REST API) w Javie 21. Używa Javalin, dane trzyma
-w plikach (bez bazy danych). Kontrakt API jest w [docs/api.md](docs/api.md).
+Odbiornik raportów honeypota: przyjmuje raporty agenta C po **HTTPS** (`POST /events`), zapisuje je do
+`events.jsonl` (deduplikacja po `report_id`) i udostępnia dashboardowi widoki tylko do odczytu pod `/api/v1/*`.
+Serwuje też sam dashboard z katalogu `../dashboard` (ten sam origin, bez CORS). Agenci są wykrywani
+z napływających raportów, nie trzeba ich rejestrować.
 
-## Struktura
+Domyślnie serwer nasłuchuje **tylko na `127.0.0.1:8443`**: agent i serwer działają na tej samej maszynie,
+a dashboard ogląda się przez tunel SSH. Pełna instalacja na AlmaLinux: [`../INSTALL.md`](../INSTALL.md).
 
-```
-server/
-├── pom.xml                         # Maven, buduje target/honeypot-server.jar
-├── Dockerfile                      # build na Maven, runtime na almalinux:9
-├── config/server.properties        # port, ścieżka sensors.json, katalog danych
-├── config/sensors.json             # pre-provisioned czujniki (sensor-01)
-├── deploy/honeypot-server.service  # unit systemd (instalacja na Linuksie)
-├── docs/api.md                     # kontrakt agent ↔ serwer
-├── examples/                       # przykładowe JSON-y do testów curl
-└── src/
-    └── main/java/pl/honeypot/server/
-        ├── Main.java               # start, routing
-        ├── ServerConfig.java
-        ├── api/                    # handlery HTTP
-        ├── store/                  # konfiguracja czujników + zapis JSONL
-        └── model/                  # rekordy JSON
-```
+## Wymagania
 
-## Budowanie i uruchomienie
+JDK 21, Maven, `openssl` (certyfikaty).
 
-Wymagane: JDK 21 i Maven (AlmaLinux: `dnf install java-21-openjdk-devel maven`).
+## Uruchomienie lokalne
 
-```bash
-mvn package
+```sh
+cd server
+mvn -DskipTests package                    # -> target/honeypot-server.jar
+./scripts/gen-certs.sh                     # -> certs/server-keystore.p12 i certs/ca.crt (SAN: IP:127.0.0.1)
 java -jar target/honeypot-server.jar config/server.properties
 ```
 
-## Test ręczny
+Dashboard: `https://127.0.0.1:8443/` (przeglądarka ostrzeże o własnym CA; zaakceptuj albo zaimportuj `certs/ca.crt`).
 
-```bash
-curl -s localhost:8000/api/v1/config/sensor-01
-curl -s -X POST localhost:8000/api/v1/events \
-     -H 'Content-Type: application/json' -d @examples/attack-report.json
-curl -s -X POST localhost:8000/api/v1/heartbeat \
-     -H 'Content-Type: application/json' -d @examples/heartbeat.json -w '%{http_code}\n'
+Szybki test bez agenta:
+
+```sh
+curl --cacert certs/ca.crt -X POST https://127.0.0.1:8443/events \
+  -H 'Content-Type: application/json' --data @examples/report-file-change.json
+curl --cacert certs/ca.crt https://127.0.0.1:8443/api/v1/stats
 ```
+
+Agent weryfikuje TLS i nie da się tego wyłączyć, więc musi ufać CA serwera, a adres, pod który się łączy,
+musi być w SAN certyfikatu (`./scripts/gen-certs.sh IP:<adres>`). Instalator agenta (`scripts/install-agent-service.sh`)
+dodaje CA do magazynu zaufania systemu.
+
+## Konfiguracja (`config/server.properties`)
+
+| Klucz | Znaczenie |
+|-------|-----------|
+| `server.bind`, `server.port` | adres i port nasłuchu (domyślnie `127.0.0.1:8443`) |
+| `server.keystore` | PKCS12 z certyfikatem i kluczem serwera (z `gen-certs.sh`) |
+| `server.keystore.password` | hasło keystore (domyślnie `changeit`; zmień przy wdrożeniu) |
+| `data.dir` | katalog logu `events.jsonl` |
+| `dashboard.dir` | katalog dashboardu do serwowania; pusty lub brak = nie serwuj |
+
+Aby serwer był osiągalny z innej maszyny, ustaw `server.bind=0.0.0.0` i otwórz port w zaporze. Uwaga: API
+nie ma uwierzytelniania, więc nie rób tego poza odizolowaną siecią.
+
+## Endpointy
+
+Pełny opis: [`docs/api.md`](docs/api.md). Skrót:
+
+- `POST /events`: agent wysyła tu każdy raport (`schema_version` 1),
+- `GET /api/v1/agents`: agenci i stan online,
+- `GET /api/v1/events?agent_id=&source=&limit=`: zdarzenia, najnowsze pierwsze (domyślnie 100, maks. 1000),
+- `GET /api/v1/stats`: liczniki zbiorcze.

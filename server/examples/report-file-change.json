@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "report_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "agent_id": "alma10-01",
+  "observed_at": "2026-10-18T12:00:00Z",
+  "source": "share",
+  "operation": "create",
+  "path": "/srv/samba/public/secret.txt",
+  "metadata": { "old_size": 0, "new_size": 42, "new_mode": 420, "mtime_sec": 1797000000 },
+  "analysis": { "classification": "file_change", "actor": null },
+  "evidence": [],
+  "content_changes": { "old_sha256": null, "new_sha256": "deadbeef", "format": "blocks64k", "blocks": [] },
+  "complete": true,
+  "error": null
+}

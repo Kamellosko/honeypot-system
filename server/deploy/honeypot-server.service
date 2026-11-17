@@ -1,29 +1,39 @@
 # systemd unit for the honeypot server.
 # Install:
-#   useradd --system --no-create-home --shell /sbin/nologin honeypot
-#   install -D target/honeypot-server.jar /opt/honeypot-server/honeypot-server.jar
-#   install -D config/server.properties /etc/honeypot-server/server.properties
-#   install -D config/sensors.json /etc/honeypot-server/sensors.json
-#     (set sensors.file=/etc/honeypot-server/sensors.json
-#      and data.dir=/var/lib/honeypot-server)
-#   cp deploy/honeypot-server.service /etc/systemd/system/
-#   systemctl daemon-reload && systemctl enable --now honeypot-server
+#   useradd --system --no-create-home --shell /sbin/nologin sysmon
+#   install -D target/honeypot-server.jar /opt/sysmon/collector.jar
+#   install -D config/server.properties /etc/sysmon/collector.properties
+#   install -D -m 600 -o sysmon certs/server-keystore.p12 \
+#       /etc/sysmon/collector.p12
+#     (in server.properties set:
+#        server.keystore=/etc/sysmon/collector.p12
+#        server.keystore.password=...
+#        data.dir=/var/lib/sysmon
+#        dashboard.dir=/opt/sysmon/dashboard   # or leave empty)
+#   cp deploy/honeypot-server.service /etc/systemd/system/sysmon-collector.service
+#   systemctl daemon-reload && systemctl enable --now sysmon-collector
+#
+# Single-host setup: server.bind=127.0.0.1, no firewall port is opened.
+# The keystore + the CA the agent trusts come from scripts/gen-certs.sh; the
+# cert SAN must contain the address the agent connects to.
 
 [Unit]
-Description=Honeypot central server (collector + API)
+Description=System monitor collector
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=honeypot
-Group=honeypot
-ExecStart=/usr/bin/java -jar /opt/honeypot-server/honeypot-server.jar /etc/honeypot-server/server.properties
+User=sysmon
+Group=sysmon
+ExecStart=/usr/lib/jvm/java-21-openjdk/bin/java -jar /opt/sysmon/collector.jar /etc/sysmon/collector.properties
 Restart=on-failure
 RestartSec=5
 
-# Creates /var/lib/honeypot-server owned by the service user
-StateDirectory=honeypot-server
+# Creates /var/lib/sysmon owned by the service user
+StateDirectory=sysmon
+StateDirectoryMode=0700
+UMask=0077
 
 # Hardening
 NoNewPrivileges=true
@@ -31,6 +41,13 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target
