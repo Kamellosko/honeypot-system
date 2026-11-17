@@ -124,5 +124,5 @@ systemctl --no-pager status sysmon-collector || true
 echo
 echo "Gotowe. Serwer wstaje automatycznie po boocie (enable) i restartuje się po awarii."
 echo "Dane: /var/lib/sysmon/events.jsonl"
-echo "Test:  curl --cacert $SERVER_DIR/certs/ca.crt https://127.0.0.1:8443/api/v1/stats"
+echo "Test:  curl --cacert $SERVER_DIR/certs/ca.crt https://127.0.0.1:8443/api/stats"
 echo "Dashboard z zewnątrz tylko przez tunel SSH:  ssh -L 8443:127.0.0.1:8443 <user>@<host>  ->  https://127.0.0.1:8443/"
