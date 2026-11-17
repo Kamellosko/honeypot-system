@@ -1,7 +1,7 @@
 # Serwer (kolektor + dashboard)
 
 Odbiornik raportów honeypota: przyjmuje raporty agenta C po **HTTPS** (`POST /events`), zapisuje je do
-`events.jsonl` (deduplikacja po `report_id`) i udostępnia dashboardowi widoki tylko do odczytu pod `/api/v1/*`.
+`events.jsonl` (deduplikacja po `report_id`) i udostępnia dashboardowi widoki tylko do odczytu pod `/api/*`.
 Serwuje też sam dashboard z katalogu `../dashboard` (ten sam origin, bez CORS). Agenci są wykrywani
 z napływających raportów, nie trzeba ich rejestrować.
 
@@ -28,7 +28,7 @@ Szybki test bez agenta:
 ```sh
 curl --cacert certs/ca.crt -X POST https://127.0.0.1:8443/events \
   -H 'Content-Type: application/json' --data @examples/report-file-change.json
-curl --cacert certs/ca.crt https://127.0.0.1:8443/api/v1/stats
+curl --cacert certs/ca.crt https://127.0.0.1:8443/api/stats
 ```
 
 Agent weryfikuje TLS i nie da się tego wyłączyć, więc musi ufać CA serwera, a adres, pod który się łączy,
@@ -44,6 +44,8 @@ dodaje CA do magazynu zaufania systemu.
 | `server.keystore.password` | hasło keystore (domyślnie `changeit`; zmień przy wdrożeniu) |
 | `data.dir` | katalog logu `events.jsonl` |
 | `dashboard.dir` | katalog dashboardu do serwowania; pusty lub brak = nie serwuj |
+| `detection.confirm.accounts` | konta-przynęty (po przecinku); udane logowanie = atakujący `confirmed` (domyślnie `backup_srv`) |
+| `detection.breadcrumb.marker` | fragment ścieżki okruszka; jego odczyt w logu = `breadcrumb_read` (domyślnie `kopia_zapasowa.sh`) |
 
 Aby serwer był osiągalny z innej maszyny, ustaw `server.bind=0.0.0.0` i otwórz port w zaporze. Uwaga: API
 nie ma uwierzytelniania, więc nie rób tego poza odizolowaną siecią.
@@ -52,7 +54,8 @@ nie ma uwierzytelniania, więc nie rób tego poza odizolowaną siecią.
 
 Pełny opis: [`docs/api.md`](docs/api.md). Skrót:
 
-- `POST /events`: agent wysyła tu każdy raport (`schema_version` 1),
-- `GET /api/v1/agents`: agenci i stan online,
-- `GET /api/v1/events?agent_id=&source=&limit=`: zdarzenia, najnowsze pierwsze (domyślnie 100, maks. 1000),
-- `GET /api/v1/stats`: liczniki zbiorcze.
+- `POST /events` (także `POST /api/events`): agent wysyła tu każdy raport (`schema_version` 1),
+- `GET /api/agents`: agenci i stan online,
+- `GET /api/events?agent_id=&source=&limit=`: zdarzenia, najnowsze pierwsze (domyślnie 100, maks. 1000),
+- `GET /api/stats`: liczniki zbiorcze,
+- `GET /api/attackers`: wykryci atakujący, stopniowani po zachowaniu ([`docs/attacker-detection.md`](docs/attacker-detection.md)).

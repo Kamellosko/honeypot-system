@@ -16,6 +16,7 @@ System niczego nie blokuje, tylko zbiera dowody.
 | [`server/`](server/README.md) | serwer w Javie, API ([`server/docs/api.md`](server/docs/api.md)), certyfikaty |
 | `dashboard/` | statyczny dashboard serwowany przez serwer |
 | `scripts/` | instalatory usług, konfiguracja Samby i tożsamości maszyny, kopia logu |
+| [`samba_structure/`](samba_structure/ustalenia-konfiguracja.md) | alternatywna persona „Dział Finansów" (SSH + Samba z `full_audit`, okruszek `backup_srv`); zastępuje `setup-samba-honeypot.sh` i `setup-persona.sh` |
 
 ## Szybki start
 

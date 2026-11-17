@@ -1,8 +1,8 @@
-# API serwera (v1)
+# API serwera
 
 Transport: **HTTPS** (TLS 1.2+), treść JSON. Serwer nasłuchuje
 na `127.0.0.1:8443`; z zewnątrz tylko przez tunel SSH. Agent wysyła **wszystkie** raporty na
-`POST /events`, endpointy `GET /api/v1/...` służą dashboardowi. API **nie ma uwierzytelniania**
+`POST /events` (ten sam odbiornik także jako `POST /api/events`), endpointy `GET /api/...` służą dashboardowi. API **nie ma uwierzytelniania**
 (ochrona: bind na loopbacku i uprawnienia plików); każdy lokalny użytkownik, który zobaczy port,
 może czytać dane i wysyłać raporty.
 
@@ -13,7 +13,7 @@ zaufania systemu (`/etc/pki/ca-trust/source/anchors/sysmon-ca.crt`).
 ## 1. Zgłoszenie raportu (agent → serwer)
 
 ```
-POST /events        Content-Type: application/json        (do 32 MB)
+POST /events        Content-Type: application/json        (do 64 MB)
 ```
 
 Wspólna koperta:
@@ -53,7 +53,7 @@ zapamiętuje `report_id`, więc ponowna wysyłka zostanie zapisana. Serwer dokle
 ## 2. Lista agentów (serwer → dashboard)
 
 ```
-GET /api/v1/agents
+GET /api/agents
 ```
 
 Agenci wykrywani są dynamicznie z raportów. `status` to `online`, gdy ostatni raport dotarł w ciągu 90 s,
@@ -63,7 +63,7 @@ inaczej `offline`. Pola: `agent_id`, `status`, `last_seen`, `first_seen`, `total
 ## 3. Dziennik zdarzeń (serwer → dashboard)
 
 ```
-GET /api/v1/events?agent_id=&source=&limit=
+GET /api/events?agent_id=&source=&limit=
 ```
 
 Najnowsze pierwsze; `limit` ≥ 1, domyślnie 100, maksymalnie 1000 (większa wartość jest obcinana do 1000).
@@ -73,11 +73,24 @@ zatrzymuje się po `limit` pasujących raportach, więc koszt nie zależy od roz
 ## 4. Statystyki (serwer → dashboard)
 
 ```
-GET /api/v1/stats
+GET /api/stats
 ```
 
 Pola: `total_events`, `total_agents`, `online_agents`, `by_source`, `by_classification`, `by_operation`.
 W `by_classification` i `by_operation` jest najwyżej 200 różnych kluczy, dalsze nowe wartości liczą się pod `other`.
+
+## 5. Wykryci atakujący (serwer → dashboard)
+
+```
+GET /api/attackers
+```
+
+Zdalne IP z połączeń TCP i nieudanych logowań, stopniowane po zachowaniu: `contact` → `suspicious` →
+`fast_enum` (≥ 3 różne porty z jednego IP w 60 s) → `brute_force` (≥ 5 nieudanych logowań w 10 min) →
+`confirmed` (udane logowanie na konto z `detection.confirm.accounts`). Loopback jest pomijany.
+Pola: `ip`, `mac`, `threat`, `first_seen`, `last_seen`, `connections`, `auth_failures`, `events`,
+`failures_10m`, `events_1m`, `distinct_ports`, `confirmed`, `breadcrumb_read`, `last_operation`.
+Szczegóły i progi: [`attacker-detection.md`](attacker-detection.md).
 
 ## Uwagi
 
