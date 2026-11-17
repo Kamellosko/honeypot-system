@@ -4,7 +4,10 @@ import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Properties;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 // Server settings loaded from a .properties file.
 //
@@ -17,7 +20,9 @@ public record ServerConfig(
         Path dataDir,
         Path keystore,
         String keystorePassword,
-        Path dashboardDir) {
+        Path dashboardDir,
+        Set<String> confirmAccounts,
+        String breadcrumbMarker) {
 
     public static ServerConfig load(Path file) throws IOException {
         Properties p = new Properties();
@@ -39,12 +44,19 @@ public record ServerConfig(
             throw new IOException("keystore file not found: " + keystore);
         }
 
+        String accs = p.getProperty("detection.confirm.accounts", "backup_srv");
+        Set<String> confirmAccounts = Arrays.stream(accs.split(","))
+                .map(String::trim).filter(x -> !x.isEmpty()).collect(Collectors.toSet());
+        String marker = p.getProperty("detection.breadcrumb.marker", "kopia_zapasowa.sh").trim();
+
         return new ServerConfig(
                 p.getProperty("server.bind", "127.0.0.1"),
                 Integer.parseInt(p.getProperty("server.port", "8443")),
                 Path.of(p.getProperty("data.dir", "data")),
                 Path.of(keystore),
                 p.getProperty("server.keystore.password", ""),
-                Path.of(p.getProperty("dashboard.dir", "../dashboard")));
+                Path.of(p.getProperty("dashboard.dir", "../dashboard")),
+                confirmAccounts,
+                marker);
     }
 }
