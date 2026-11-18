@@ -1,5 +1,7 @@
 # Instalacja od zera: honeypot na AlmaLinux 9.8 + test z Linux Mint
 
+> To jest starszy wariant `fs01`. Aktualna, pełna instrukcja (wariant „Dział Finansów", z kluczem SSH, sprzątaniem i usunięciem konta tymczasowego) jest w [`docs/WDROZENIE-OD-ZERA.md`](docs/WDROZENIE-OD-ZERA.md). Nie mieszaj obu wariantów na jednej maszynie.
+
 Wersja instrukcji, w której atakującym (maszyną testową) jest **Linux Mint XFCE** zamiast Kali.
 
 Jedna maszyna (Alma, hostname `fs01`) robi wszystko: Samba-wabik, agent, serwer i dashboard.
