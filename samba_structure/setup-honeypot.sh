@@ -29,7 +29,7 @@ timedatectl set-timezone "$HP_TIMEZONE" || true
 localectl set-locale "LANG=$HP_LOCALE" 2>/dev/null || true
 
 echo ">> Pakiety"
-dnf install -y samba samba-common samba-vfs-modules policycoreutils-python-utils \
+dnf install -y samba samba-common policycoreutils-python-utils \
                audit openssh-server rsyslog util-linux
 if [ "${HP_ENABLE_WSDD:-no}" = "yes" ]; then
   dnf install -y wsdd 2>/dev/null || echo "   (wsdd niedostępny — włącz EPEL: dnf install -y epel-release, potem wsdd)"
@@ -129,7 +129,7 @@ echo ">> [3] smb.conf (udziały + full_audit)"
 [ -f /etc/samba/smb.conf ] && [ ! -f /etc/samba/smb.conf.bak ] && cp -a /etc/samba/smb.conf "/etc/samba/smb.conf.bak.$(date +%s)"
 AUDIT_VFS='vfs objects = full_audit
    full_audit:prefix = %u|%I|%m|%S
-   full_audit:success = connect disconnect opendir mkdir rmdir open read pread write pwrite rename unlink
+   full_audit:success = connect disconnect fdopendir mkdirat unlinkat open openat read pread write pwrite renameat
    full_audit:failure = connect
    full_audit:facility = local5
    full_audit:priority = notice'
@@ -239,14 +239,27 @@ for ip in "${HP_LOGIN_HISTORY_IPS[@]}"; do
   done
 done
 LC_ALL=C sort -s -k1,1M -k2,2n -k3,3 -o /var/log/secure /var/log/secure
-# b) wtmp (last) — best-effort przez utmpdump; nie wywala skryptu przy błędzie
+# b) wtmp (last): ukończone sesje z wewnętrznych IP, od najstarszej. Rekordy wylogowania (typ 8) sprawiają, że
+#    `last` pokazuje czas trwania zamiast "still logged in". Pola utmpdump: typ, pid, id, user, line, host, addr, czas.
+#    Dopisane PRZED istniejącym wtmp, bo `last` czyta od końca pliku (najnowszy wpis na końcu).
+WTMP="${WTMP:-/var/log/wtmp}"
 if command -v utmpdump >/dev/null 2>&1; then
-  { for ip in "${HP_LOGIN_HISTORY_IPS[@]}"; do
-      t="$(date -d '3 days ago' '+%Y-%m-%dT%H:%M:%S,000000+0000')"
-      printf '[7] [%05d] [ts/0] [%s] [%s     ] [pts/0       ] [%s] [%s] [%s]\n' \
-        $((RANDOM%40000+1000)) "$HP_SHELL_DECOY_USER" "$HP_SHELL_DECOY_USER" "$ip" "$ip" "$t"
-    done; } | utmpdump -r >> /var/log/wtmp 2>/dev/null \
+  SEED="$(mktemp)"
+  n=0
+  for d in 9 6 3; do
+    for ip in "${HP_LOGIN_HISTORY_IPS[@]}"; do
+      n=$((n+1))
+      usr="$HP_SHELL_DECOY_USER"; [ $((n%2)) -eq 0 ] && usr="$HP_ADMIN_USER"
+      pid=$((RANDOM%30000+1000)); t0=$(date -d "$d days ago 10:$(printf '%02d' $((n*7%60))):00" +%s)
+      printf '[7] [%05d] [ts/%d] [%-32s] [pts/%d       ] [%-256s] [%-15s] [%s]\n' "$pid" "$n" "$usr" "$((n%6))" "$ip" "$ip" \
+        "$(date -u -d "@$t0" '+%Y-%m-%dT%H:%M:%S,000000+0000')"
+      printf '[8] [%05d] [ts/%d] [%-32s] [pts/%d       ] [%-256s] [%-15s] [%s]\n' "$pid" "$n" "" "$((n%6))" "" "0.0.0.0" \
+        "$(date -u -d "@$((t0 + (RANDOM%50+5)*60))" '+%Y-%m-%dT%H:%M:%S,000000+0000')"
+    done
+  done | utmpdump -r > "$SEED" 2>/dev/null \
+    && { cat "$SEED" "$WTMP" > "$SEED.all" 2>/dev/null; cat "$SEED.all" > "$WTMP"; } \
     || echo "   (wtmp: pominięto — format utmpdump do dostrojenia na docelowym systemie)"
+  rm -f "$SEED" "$SEED.all"
 fi
 
 echo ">> [7] Stare, zrotowane logi (nazwy jak logrotate w RHEL; agent czyta tylko /var/log/messages, nie te pliki)"
