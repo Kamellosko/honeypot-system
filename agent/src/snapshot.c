@@ -433,7 +433,7 @@ int hp_report_simple(struct hp_store *s, const char *source, const char *operati
                        memmem(content, content_size, "Accepted password", 17) ||
                        memmem(content, content_size, "Accepted publickey", 18)))
     classification = "authentication_success";
-  else if (content && memmem(content, content_size, "smbd_audit:", 11))
+  else if (content && memmem(content, content_size, "smbd_audit", 10))
     classification = "samba_audit";
   else if (!strcmp(operation, "heartbeat"))
     classification = "heartbeat";

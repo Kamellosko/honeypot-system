@@ -110,6 +110,13 @@ int main(void) {
   report = last_report(state, "observation_gap");
   assert(report);
   cJSON_Delete(report);
+  // full_audit lines reach the agent as "smbd_audit[PID]: ...", with the PID between the name and the colon.
+  const unsigned char audit[] = "Nov 18 13:16:46 fs smbd_audit[39615]: a.kowalska|192.0.2.8|pc|Archiwum_|openat|ok|r|/srv/samba/Archiwum/IT/kopia_zapasowa.sh";
+  assert(hp_report_simple(&store, "log", "append", "/var/log/samba/audit.log", NULL, audit, sizeof(audit) - 1) == 0);
+  report = last_report(state, "append");
+  assert(report);
+  assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(report, "analysis"), "classification")->valuestring, "samba_audit"));
+  cJSON_Delete(report);
   close(share_fd);
   assert(symlink("/etc/passwd", file) == 0);
   assert(hp_snapshot_event(&store, root, dir, "data", "modify") != 0);

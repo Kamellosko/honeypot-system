@@ -8,6 +8,7 @@ System niczego nie blokuje, tylko zbiera dowody.
 
 | Ścieżka | Zawartość |
 |---|---|
+| [`docs/WDROZENIE-OD-ZERA.md`](docs/WDROZENIE-OD-ZERA.md) | **pełna instrukcja wdrożenia na nowej maszynie** (wariant „Dział Finansów": klucz SSH, serwer, persona, agent, testy, sprzątanie, usunięcie konta tymczasowego) |
 | [`INSTALL.md`](INSTALL.md) | instalacja od zera krok po kroku (Alma + maszyna testowa) |
 | [`docs/PRZEGLAD.md`](docs/PRZEGLAD.md) | jak to działa, w skrócie |
 | [`docs/dzialanie-systemu.md`](docs/dzialanie-systemu.md) | opis techniczny, parametry, znane luki |
