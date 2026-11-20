@@ -91,7 +91,9 @@ public final class ReportStore {
             @JsonProperty("online_agents") int onlineAgents,
             @JsonProperty("by_source") Map<String, Long> bySource,
             @JsonProperty("by_classification") Map<String, Long> byClassification,
-            @JsonProperty("by_operation") Map<String, Long> byOperation) {
+            @JsonProperty("by_operation") Map<String, Long> byOperation,
+            @JsonProperty("by_event_type") Map<String, Long> byEventType,
+            @JsonProperty("unknown_event_types") long unknownEventTypes) {
     }
 
     // One attacker for GET /api/attackers.
@@ -116,6 +118,11 @@ public final class ReportStore {
     private static final Pattern SSH_ACCEPTED = Pattern.compile(
             "Accepted (?:password|publickey) for (\\S+) from (\\d{1,3}(?:\\.\\d{1,3}){3})");
 
+    // Event types the agent knows today (schema v2 catalog). Others are still stored, just counted separately.
+    public static final Set<String> KNOWN_EVENT_TYPES = Set.of("file.change", "net.connection", "auth.failure",
+            "auth.success", "samba.audit", "system.heartbeat", "system.source_unavailable",
+            "system.observation_gap", "log.entry", "system.unknown");
+
     private final JsonlLog log;
     private final Object lock = new Object();
     private final Set<String> confirmAccounts;
@@ -126,6 +133,8 @@ public final class ReportStore {
     private final Map<String, Long> bySource = new ConcurrentHashMap<>();
     private final Map<String, Long> byClassification = new ConcurrentHashMap<>();
     private final Map<String, Long> byOperation = new ConcurrentHashMap<>();
+    private final Map<String, Long> byEventType = new ConcurrentHashMap<>();
+    private volatile long unknownEventTypes;
     private final Map<String, AttackerState> attackers = new ConcurrentHashMap<>();
     private volatile long totalEvents;
 
@@ -181,6 +190,15 @@ public final class ReportStore {
         String classification = analysis != null ? text(analysis, "classification") : null;
         bump(byClassification, capKey(byClassification, classification));
 
+        JsonNode event = n.get("event");
+        String eventType = event != null ? text(event, "type") : null;
+        if (eventType != null) {
+            bump(byEventType, capKey(byEventType, eventType));
+            if (!KNOWN_EVENT_TYPES.contains(eventType)) {
+                unknownEventTypes++;
+            }
+        }
+
         Instant parsed = parse(text(n, "received_at"));
         final Instant at = parsed != null ? parsed : Instant.now();
         String operation = text(n, "operation");
@@ -200,7 +218,12 @@ public final class ReportStore {
         // "from IP" in sshd) first, while later ones are this server ("local host [..]") or made-up
         // addresses the attacker typed into the user name.
         if ("authentication_failure".equals(classification)) {
-            String ip = firstEndpoint(n);
+            // v2 reports carry the parsed source address; v1 falls back to the text-derived endpoint.
+            JsonNode src = event != null ? event.get("src") : null;
+            String ip = src != null ? text(src, "ip") : null;
+            if (ip == null) {
+                ip = firstEndpoint(n);
+            }
             if (ip != null) {
                 recordAttacker(ip, null, at, true, null, operation);
             }
@@ -423,7 +446,9 @@ public final class ReportStore {
                 online,
                 new TreeMap<>(bySource),
                 new TreeMap<>(byClassification),
-                new TreeMap<>(byOperation));
+                new TreeMap<>(byOperation),
+                new TreeMap<>(byEventType),
+                unknownEventTypes);
     }
 
     // Past MAX_KEYS distinct keys, a new key is counted under "other". Caller holds lock.

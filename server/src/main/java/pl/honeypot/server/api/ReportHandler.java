@@ -41,8 +41,11 @@ public final class ReportHandler implements Handler {
             throw new BadRequestResponse("body must be a JSON object");
         }
         JsonNode schema = body.get("schema_version");
-        if (schema == null || !schema.isInt() || schema.asInt() != 1) {
-            throw new BadRequestResponse("schema_version must be 1");
+        if (schema == null || !schema.isInt() || (schema.asInt() != 1 && schema.asInt() != 2)) {
+            throw new BadRequestResponse("schema_version must be 1 or 2");
+        }
+        if (schema.asInt() == 2) {
+            EventValidator.validate(body.get("event"));
         }
         String reportId = str(body, "report_id");
         if (reportId == null || !REPORT_ID.matcher(reportId).matches()) {
