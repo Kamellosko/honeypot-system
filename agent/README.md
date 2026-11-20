@@ -53,7 +53,7 @@ Program może wystartować bez argumentów. Domyślne wartości znajdują się w
 | `DEST_PORT` | `443` |
 | `HEARTBEAT_INTERVAL` | `60` sekund |
 
-Administrator może nadpisać identyfikator i cel przez `--id`, `--ip`, `--port`. Nie ma argumentu CLI zmieniającego katalog stanu ani monitorowane źródła.
+Administrator może nadpisać identyfikator i cel przez `--id`, `--ip`, `--port`. Dodatkowo `--dev` (bez wartości) zostawia stdout/stderr podłączone i wypisuje błędy zapisu oraz jedną linię na każdą próbę wysyłki (`send report_id=… http=… curl=…`); bez niego agent milczy i podszywa się pod `sys-auditd`. Nie ma argumentu CLI zmieniającego katalog stanu ani monitorowane źródła.
 
 Przykład wartości kompilacyjnych — adres `192.0.2.10` jest przykładowy, zastąp go adresem własnego odbiornika:
 

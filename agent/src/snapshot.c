@@ -400,12 +400,14 @@ static int report_end(struct hp_store *s, FILE *out, const char *filename) {
   snprintf(tmp, sizeof(tmp), ".%.64s.tmp", filename);
   int fd = fileno(out);
   if (ferror(out) || fputc('}', out) == EOF || fflush(out) || hp_sync(fd)) {
+    hp_dev_log("report write failed: %s\n", strerror(errno));
     fclose(out); explicit_bzero(s->report_buffer, sizeof(s->report_buffer));
     unlinkat(s->pending_fd, tmp, 0); return -1;
   }
   int close_failed = fclose(out);
   explicit_bzero(s->report_buffer, sizeof(s->report_buffer));
   if (close_failed || renameat2(s->pending_fd, tmp, s->pending_fd, filename, RENAME_NOREPLACE) || hp_sync(s->pending_fd)) {
+    hp_dev_log("report commit failed: %s\n", strerror(errno));
     unlinkat(s->pending_fd, tmp, 0); return -1;
   }
   return 0;

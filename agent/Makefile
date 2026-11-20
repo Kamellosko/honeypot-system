@@ -87,6 +87,8 @@ check: $(addprefix build/,$(addsuffix _test,$(TESTS))) build/honeypot build/http
 	@build/honeypot --id x --ip bad --port 443 >/dev/null 2>&1; test $$? -eq 2
 	@build/honeypot --id x --ip 127.0.0.1 --port 0 >/dev/null 2>&1; test $$? -eq 2
 	@build/honeypot --id x --ip 127.0.0.1 --port 443 --extra z >/dev/null 2>&1; test $$? -eq 2
+	@build/honeypot --dev --dev >/dev/null 2>&1; test $$? -eq 2
+	@build/honeypot --dev --ip >/dev/null 2>&1; test $$? -eq 2
 
 clean:
 	rm -rf build
