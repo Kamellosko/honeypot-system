@@ -1,15 +1,45 @@
 {
-  "schema_version": 1,
-  "report_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "schema_version": 2,
+  "agent_version": "0.2.0",
+  "report_id": "e4a3fd7cba5434451f8740728b2adf9768b14d3cb5170b20e4ea6be172fb6af7",
   "agent_id": "alma10-01",
-  "observed_at": "2026-10-18T12:00:00Z",
+  "observed_at": "2026-11-20T10:19:22Z",
   "source": "share",
   "operation": "create",
-  "path": "/srv/samba/public/secret.txt",
-  "metadata": { "old_size": 0, "new_size": 42, "new_mode": 420, "mtime_sec": 1797000000 },
-  "analysis": { "classification": "file_change", "actor": null },
+  "path": "/tmp/hp-gen-ujx0pc/secret.txt",
+  "metadata": {
+    "old_size": 0,
+    "new_size": 6,
+    "old_mode": null,
+    "new_mode": 420,
+    "old_uid": null,
+    "new_uid": 1000,
+    "old_gid": null,
+    "new_gid": 1000,
+    "mtime_sec": 1795169962
+  },
+  "event": {
+    "category": "file",
+    "type": "file.change",
+    "severity": "medium",
+    "outcome": "unknown",
+    "service": null,
+    "action": "create",
+    "src": null,
+    "dst": null,
+    "user": null
+  },
+  "analysis": {
+    "classification": "file_change",
+    "actor": null
+  },
   "evidence": [],
-  "content_changes": { "old_sha256": null, "new_sha256": "deadbeef", "format": "blocks64k", "blocks": [] },
+  "content_changes": {
+    "old_sha256": null,
+    "new_sha256": "4c0c8df4233a6d956651c66ef8a60e944e1e420a0151526c86bd1086bf16d6ed",
+    "format": "unified",
+    "diff": "--- old\n+++ new\n@@ -0,0 +1,1 @@\n+tajne\n"
+  },
   "complete": true,
   "error": null
 }

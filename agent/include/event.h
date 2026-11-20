@@ -16,4 +16,7 @@ struct hp_event {
 const char *hp_classify(const char *operation, const unsigned char *content, size_t size);
 void hp_event_from_log(struct hp_event *e, const char *source, const char *operation,
                        const unsigned char *content, size_t size);
+void hp_event_file(struct hp_event *e, const char *action);
+void hp_event_connection(struct hp_event *e, const char *local_ip, unsigned short local_port,
+                         const char *peer_ip, unsigned short peer_port);
 void hp_event_write(FILE *out, const struct hp_event *e);

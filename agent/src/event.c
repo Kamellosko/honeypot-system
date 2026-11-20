@@ -123,6 +123,8 @@ void hp_event_from_log(struct hp_event *e, const char *source, const char *opera
     set(e, "system", "system.observation_gap", "medium");
   } else if (!strcmp(operation, "source_unavailable")) {
     set(e, "system", "system.source_unavailable", "medium");
+  } else if (!strcmp(source, "share")) {
+    hp_event_file(e, operation);
   } else if (!strcmp(source, "log")) {
     set(e, "system", "log.entry", "info");
   } else {
@@ -139,6 +141,26 @@ void hp_event_from_log(struct hp_event *e, const char *source, const char *opera
   struct hp_network_context ctx;
   hp_extract_ips(line, len, &ctx);
   if (ctx.count) snprintf(e->src_ip, sizeof(e->src_ip), "%s", ctx.ips[0]);
+}
+
+void hp_event_file(struct hp_event *e, const char *action) {
+  memset(e, 0, sizeof(*e));
+  e->src_port = e->dst_port = -1;
+  e->outcome = "unknown";
+  set(e, "file", "file.change", "medium");
+  e->action = action;
+}
+
+void hp_event_connection(struct hp_event *e, const char *local_ip, unsigned short local_port,
+                         const char *peer_ip, unsigned short peer_port) {
+  memset(e, 0, sizeof(*e));
+  e->outcome = "unknown";
+  set(e, "network", "net.connection", "low");
+  snprintf(e->src_ip, sizeof(e->src_ip), "%s", peer_ip);
+  snprintf(e->dst_ip, sizeof(e->dst_ip), "%s", local_ip);
+  e->src_port = peer_port;
+  e->dst_port = local_port;
+  e->service = local_port == 22 ? "ssh" : (local_port == 139 || local_port == 445) ? "smb" : NULL;
 }
 
 static void str_or_null(FILE *out, const char *s) {

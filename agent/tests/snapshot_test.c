@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "snapshot.h"
+#include "config.h"
 #include "cJSON.h"
 #include <assert.h>
 #include <dirent.h>
@@ -42,6 +43,15 @@ static cJSON *last_report(const char *state, const char *wanted) {
   return report;
 }
 
+static cJSON *expect_event(cJSON *report, const char *type, const char *severity) {
+  assert(cJSON_GetObjectItem(report, "schema_version")->valueint == 2);
+  assert(!strcmp(cJSON_GetObjectItem(report, "agent_version")->valuestring, HP_VERSION));
+  cJSON *event = cJSON_GetObjectItem(report, "event");
+  assert(event && !strcmp(cJSON_GetObjectItem(event, "type")->valuestring, type));
+  assert(!strcmp(cJSON_GetObjectItem(event, "severity")->valuestring, severity));
+  return event;
+}
+
 int main(void) {
   char dir[] = "/tmp/hp-snapshot-XXXXXX", state[256], file[256];
   assert(mkdtemp(dir));
@@ -74,6 +84,9 @@ int main(void) {
   cJSON *endpoint = cJSON_GetArrayItem(cJSON_GetObjectItem(network, "endpoints"), 0);
   assert(endpoint && !strcmp(cJSON_GetObjectItem(endpoint, "ip")->valuestring, "192.0.2.8"));
   assert(cJSON_GetObjectItem(cJSON_GetObjectItem(report, "analysis"), "actor")->type == cJSON_NULL);
+  cJSON *event = expect_event(report, "file.change", "medium");
+  assert(!strcmp(cJSON_GetObjectItem(event, "category")->valuestring, "file"));
+  assert(!strcmp(cJSON_GetObjectItem(event, "action")->valuestring, "modify"));
   cJSON_Delete(report);
   assert(hp_snapshot_event(&store, root, dir, "data", "baseline") == 0);
   assert(hp_store_pending_count(&store) == 1);
@@ -109,6 +122,7 @@ int main(void) {
   assert(last_report(state, "delete_during_downtime") == NULL);
   report = last_report(state, "observation_gap");
   assert(report);
+  expect_event(report, "system.observation_gap", "medium");
   cJSON_Delete(report);
   // full_audit lines reach the agent as "smbd_audit[PID]: ...", with the PID between the name and the colon.
   const unsigned char audit[] = "Nov 18 13:16:46 fs smbd_audit[39615]: a.kowalska|192.0.2.8|pc|Archiwum_|openat|ok|r|/srv/samba/Archiwum/IT/kopia_zapasowa.sh";
@@ -116,6 +130,22 @@ int main(void) {
   report = last_report(state, "append");
   assert(report);
   assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(report, "analysis"), "classification")->valuestring, "samba_audit"));
+  event = expect_event(report, "samba.audit", "low");
+  assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(event, "user"), "name")->valuestring, "a.kowalska"));
+  cJSON_Delete(report);
+  assert(hp_report_simple(&store, "system", "heartbeat", "", NULL, NULL, 0) == 0);
+  report = last_report(state, "heartbeat");
+  assert(report);
+  expect_event(report, "system.heartbeat", "info");
+  cJSON_Delete(report);
+  assert(hp_report_connection(&store, "10.0.0.2", 22, "192.0.2.50", 51000) == 0);
+  report = last_report(state, "tcp_connection_observed");
+  assert(report);
+  event = expect_event(report, "net.connection", "low");
+  assert(!strcmp(cJSON_GetObjectItem(event, "service")->valuestring, "ssh"));
+  assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(event, "src"), "ip")->valuestring, "192.0.2.50"));
+  assert(cJSON_GetObjectItem(cJSON_GetObjectItem(event, "src"), "port")->valueint == 51000);
+  assert(cJSON_GetObjectItem(cJSON_GetObjectItem(event, "dst"), "port")->valueint == 22);
   cJSON_Delete(report);
   close(share_fd);
   assert(symlink("/etc/passwd", file) == 0);

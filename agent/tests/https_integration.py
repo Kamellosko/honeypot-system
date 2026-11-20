@@ -96,7 +96,7 @@ def assert_payload(receiver):
     assert path == "/events", path
     assert content_type == "application/json", content_type
     report = json.loads(body)
-    assert report["schema_version"] == 1, report
+    assert report["schema_version"] == 2, report
     assert report["agent_id"] == "https-fixture-agent", report
     assert report["source"] == "status", report
     assert report["operation"] == "fixture_event", report
