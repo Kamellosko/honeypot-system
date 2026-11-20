@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "event.h"
 #include "cJSON.h"
+#include "protocol.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,6 +97,99 @@ int main(void) {
   assert(!strcmp(cJSON_GetObjectItem(src, "ip")->valuestring, "203.0.113.9"));
   assert(cJSON_GetObjectItem(src, "port")->valueint == 7 && IS_NULL(cJSON_GetObjectItem(src, "mac")));
   assert(IS_NULL(cJSON_GetObjectItem(ev, "dst")));
+  cJSON_Delete(j);
+
+  /* auth.attempt: linia hp-pam (skrypt hook PAM), 5. pole syslog = znacznik programu */
+  LOG(e, "Nov 20 12:00:00 honey hp-pam: u=Ym9i h=203.0.113.9 p=aHVudGVyMg==");
+  assert(!strcmp(e.type, "auth.attempt") && !strcmp(e.category, "authentication"));
+  assert(!strcmp(e.outcome, "failure") && !strcmp(e.severity, "medium") && !strcmp(e.service, "ssh"));
+  assert(!strcmp(e.user, "bob") && !strcmp(e.src_ip, "203.0.113.9"));
+  assert(e.has_password && e.password_len == 7 && !memcmp(e.password, "hunter2", 7));
+  assert(!strcmp(hp_classify("append", (const unsigned char *)"Nov 20 12:00:00 honey hp-pam: u=Ym9i h=1.2.3.4 p=QQ==", 49),
+                 "authentication_attempt"));
+  j = written(&e);
+  ev = cJSON_GetObjectItem(j, "event");
+  assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(ev, "credential"), "password")->valuestring, "hunter2"));
+  assert(IS_NULL(cJSON_GetObjectItem(ev, "detail")));
+  cJSON_Delete(j);
+
+  LOG(e, "Nov 20 12:00:00 honey hp-pam: u=Ym9i h=203.0.113.9 p=");
+  assert(!strcmp(e.type, "auth.attempt") && e.has_password && e.password_len == 0);
+  j = written(&e);
+  assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(j, "event"), "credential"), "password")->valuestring, ""));
+  cJSON_Delete(j);
+
+  LOG(e, "Nov 20 12:00:00 honey hp-pam: u=Ym9i h=203.0.113.9 p=YSJiCmM=");  /* a"b<LF>c */
+  j = written(&e);
+  assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(j, "event"), "credential"), "password")->valuestring, "a\"b\nc"));
+  cJSON_Delete(j);
+
+  LOG(e, "Nov 20 12:00:00 honey hp-pam: u=Ym9i h=203.0.113.9 p=eP8=");     /* 'x' 0xff: nie-UTF-8 */
+  j = written(&e);
+  cJSON *cred = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "event"), "credential");
+  assert(IS_NULL(cJSON_GetObjectItem(cred, "password")));
+  assert(!strcmp(cJSON_GetObjectItem(cred, "password_base64")->valuestring, "eP8="));
+  cJSON_Delete(j);
+
+  /* podrobiona linia: nazwa uzytkownika sshd zawiera "hp-pam: ..." (znacznik programu to sshd[7]:) */
+  LOG(e, "Nov 20 12:00:00 honey sshd[7]: Failed password for invalid user hp-pam: u=Ym9i h=1.2.3.4 p=QQ== from 203.0.113.9 port 1 ssh2");
+  assert(!strcmp(e.type, "auth.failure") && !e.has_password);
+
+  /* uszkodzone: zly base64, brak p=, brak u=, puste u= */
+  LOG(e, "Nov 20 12:00:00 honey hp-pam: u=Ym9i h=203.0.113.9 p=@@@");
+  assert(!strcmp(e.type, "log.entry") && !e.has_password);
+  LOG(e, "Nov 20 12:00:00 honey hp-pam: u=Ym9i h=203.0.113.9");
+  assert(!strcmp(e.type, "log.entry"));
+  LOG(e, "Nov 20 12:00:00 honey hp-pam: h=203.0.113.9 p=QQ==");
+  assert(!strcmp(e.type, "log.entry"));
+  LOG(e, "Nov 20 12:00:00 honey hp-pam: u= h=203.0.113.9 p=QQ==");
+  assert(!strcmp(e.type, "log.entry"));
+
+  /* haslo dluzsze niz 256 bajtow jest obcinane (300 x 'A') */
+  char longpw[900] = "Nov 20 12:00:00 honey hp-pam: u=Ym9i h=203.0.113.9 p=";
+  for (int i = 0; i < 100; i++) strcat(longpw, "QUFB");
+  LOG(e, longpw);
+  assert(e.has_password && e.password_len == 256);
+
+  /* nazwa uzytkownika spoza UTF-8 (base64 w linii hp-pam) nie moze dawac niepoprawnego JSON */
+  LOG(e, "Nov 20 12:00:00 honey hp-pam: u=/3g= h=203.0.113.9 p=QQ==");
+  assert(!strcmp(e.type, "auth.attempt") && e.has_password);
+  assert(!strcmp(e.user, "?x") && hp_valid_utf8((const unsigned char *)e.user, strlen(e.user)));
+  LOG(e, "Nov 20 12:00:00 honey hp-pam: u=YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYcOp h=203.0.113.9 p=QQ==");  /* 127 x 'a' + e-acute: ciecie w srodku znaku */
+  assert(strlen(e.user) == 128 && hp_valid_utf8((const unsigned char *)e.user, strlen(e.user)));
+
+  /* dobrze zbudowana linia z blednym znacznikiem programu nie jest hp-pam (znacznik to 5. pole) */
+  LOG(e, "Nov 20 12:00:00 honey sshd[7]: u=Ym9i h=1.2.3.4 p=QQ==");
+  assert(!strcmp(e.type, "log.entry") && !e.has_password);
+  /* udane logowanie nigdy nie daje auth.attempt */
+  LOG(e, "Accepted password for bob from 203.0.113.9 port 1 ssh2");
+  assert(!strcmp(e.type, "auth.success") && !e.has_password);
+
+  /* net.scan */
+  struct hp_scan_hit hit = { "192.0.2.50", "10.0.0.2", 12, "syn", 10 };
+  hp_event_scan(&e, &hit);
+  assert(!strcmp(e.type, "net.scan") && !strcmp(e.category, "network") && !strcmp(e.severity, "medium"));
+  assert(!strcmp(e.outcome, "unknown") && !strcmp(e.src_ip, "192.0.2.50") && e.dst_port == -1 && e.src_port == -1);
+  j = written(&e);
+  ev = cJSON_GetObjectItem(j, "event");
+  cJSON *det = cJSON_GetObjectItem(ev, "detail");
+  assert(cJSON_GetObjectItem(det, "ports")->valueint == 12 && cJSON_GetObjectItem(det, "window_seconds")->valueint == 10);
+  assert(!strcmp(cJSON_GetObjectItem(det, "scan")->valuestring, "syn"));
+  assert(IS_NULL(cJSON_GetObjectItem(cJSON_GetObjectItem(ev, "dst"), "port")));
+  assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(ev, "dst"), "ip")->valuestring, "10.0.0.2"));
+  assert(IS_NULL(cJSON_GetObjectItem(ev, "credential")));
+  cJSON_Delete(j);
+
+  /* wszystkie pozostale zdarzenia maja credential i detail = null */
+  LOG(e, "Failed password for alice from 203.0.113.9 port 1 ssh2");
+  j = written(&e);
+  ev = cJSON_GetObjectItem(j, "event");
+  assert(IS_NULL(cJSON_GetObjectItem(ev, "credential")) && IS_NULL(cJSON_GetObjectItem(ev, "detail")));
+  cJSON_Delete(j);
+  hp_event_file(&e, "create");
+  j = written(&e);
+  ev = cJSON_GetObjectItem(j, "event");
+  assert(IS_NULL(cJSON_GetObjectItem(ev, "credential")) && IS_NULL(cJSON_GetObjectItem(ev, "detail")));
   cJSON_Delete(j);
   return 0;
 }

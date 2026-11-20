@@ -64,6 +64,31 @@ class ReportStoreEventTest {
         assertEquals(1L, store.stats().byEventType().get("future.thing"));
     }
 
+    private static String typedEvent(String type, String srcIp) {
+        return "{\"category\":\"x\",\"type\":\"" + type + "\",\"severity\":\"medium\",\"outcome\":\"unknown\","
+                + "\"service\":null,\"action\":null,\"src\":{\"ip\":\"" + srcIp + "\",\"port\":null,\"mac\":null},"
+                + "\"dst\":null,\"user\":null}";
+    }
+
+    @Test
+    void netScanIsKnownAndMarksScannerAsFastEnum() throws Exception {
+        store.insert(report(2, "port_scan", null, typedEvent("net.scan", "192.0.2.50")));
+        assertEquals(1L, store.stats().byEventType().get("net.scan"));
+        assertEquals(0L, store.stats().unknownEventTypes());
+        assertEquals("192.0.2.50", store.attackers().get(0).ip());
+        assertEquals("fast_enum", store.attackers().get(0).threat());
+    }
+
+    @Test
+    void authAttemptIsKnownAndDoesNotDoubleCountFailures() throws Exception {
+        store.insert(report(2, "authentication_attempt", null, typedEvent("auth.attempt", "203.0.113.9")));
+        assertEquals(0L, store.stats().unknownEventTypes());
+        assertTrue(store.attackers().isEmpty());
+        store.insert(report(2, "authentication_failure", null, authEvent("203.0.113.9")));
+        store.insert(report(2, "authentication_attempt", null, typedEvent("auth.attempt", "203.0.113.9")));
+        assertEquals(1, store.attackers().get(0).authFailures());
+    }
+
     @Test
     void byEventTypeCountsKnownType() throws Exception {
         store.insert(report(2, "authentication_failure", null, authEvent("203.0.113.9")));

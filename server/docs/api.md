@@ -43,6 +43,15 @@ Blok `event` (v2; schemat: [`docs/schema/event-v2.schema.json`](../../docs/schem
 | `service`, `action` | string lub `null` |
 | `src`, `dst` | `{ip, port, mac}`; `mac` jest zawsze `null` (etap 1) |
 | `user` | `null` albo `{ "name": ... }` |
+| `credential` | `null` albo `{ "password": tekst\|null, "password_base64": tekst }` (0.3.0, tylko `auth.attempt`; hasło nie-UTF-8 idzie w `password_base64`, `password` jest wtedy `null`; limit 1024 znaków) |
+| `detail` | `null` albo `{ "ports": int>=1, "scan": nazwa, "window_seconds": int>=1 }` (0.3.0, tylko `net.scan`) |
+
+**Typy dodane w 0.3.0 (etap 2).** `auth.attempt` (`authentication`, `medium`, `failure`, `service: ssh`): próbowane hasło SSH
+z hooka PAM; zawsze towarzyszy mu zwykłe `auth.failure` z logu `sshd` (dwa niezależne źródła, serwer nie liczy prób
+podwójnie). `net.scan` (`network`, `medium`, `unknown`, `src.ip` ustawione, `dst.port` `null`): agent zgłasza skan, gdy jedno
+źródło dotknie co najmniej 10 różnych zamkniętych portów w 10 s (rodzaj w `detail.scan`: `syn`, `null`, `xmas`, `fin`, `other`).
+Serwer oznacza takie źródło w `/api/attackers` jako `fast_enum` (flaga trwała, nie okienkowa).
+**Hasła są zapisywane jawnie** (`credential.password`, a także w surowej treści logu); zabezpiecz magazyn tak jak raporty z treścią plików.
 
 Stare pola (`analysis.classification` itd.) zostają obok `event`. Serwer waliduje `event` w raportach v2 (zły blok → `400`)
 i liczy zdarzenia po `event.type` (`by_event_type` w `/api/stats`).

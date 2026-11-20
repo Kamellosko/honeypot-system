@@ -1,4 +1,5 @@
 #pragma once
+#include "scan.h"
 #include "snapshot.h"
 #include <stddef.h>
 #include <sys/types.h>
@@ -49,6 +50,7 @@ struct hp_monitor {
   size_t root_count;
   struct hp_log *logs;
   size_t log_count;
+  struct hp_scan_tracker *scan; /* liczy skany z linii zapory w logu "messages" */
   struct hp_move moves[128];
   struct hp_created created[128];
 };

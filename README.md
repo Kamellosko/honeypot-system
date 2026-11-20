@@ -16,7 +16,7 @@ System niczego nie blokuje, tylko zbiera dowody.
 | [`docs/projekt_honeypot.md`](docs/projekt_honeypot.md) | pierwotna koncepcja i plan projektu |
 | [`agent/`](agent/README.md) | agent w C (źródła, testy, usługa systemd) |
 | [`server/`](server/README.md) | serwer w Javie, API ([`server/docs/api.md`](server/docs/api.md)), wykrywanie atakujących ([`attacker-detection.md`](server/docs/attacker-detection.md)), certyfikaty |
-| [`docs/schema/event-v2.schema.json`](docs/schema/event-v2.schema.json) | JSON Schema bloku `event` (schema v2); wersja projektu w pliku `VERSION` |
+| [`docs/schema/event-v2.schema.json`](docs/schema/event-v2.schema.json) | JSON Schema bloku `event` (schema v2); wersja projektu w pliku `VERSION`; od 0.3.0 także `auth.attempt` (hasła z prób SSH) i `net.scan` |
 | `dashboard/` | statyczny dashboard serwowany przez serwer |
 | `scripts/` | instalatory usług, konfiguracja Samby i tożsamości maszyny, kopia logu |
 | [`samba_structure/`](samba_structure/ustalenia-konfiguracja.md) | alternatywna persona „Dział Finansów" (SSH + Samba z `full_audit`, okruszek `backup_srv`); zastępuje `setup-samba-honeypot.sh` i `setup-persona.sh` |

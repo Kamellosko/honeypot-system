@@ -64,6 +64,7 @@ public final class ReportStore {
         Instant lastSeen;
         long connections;
         long authFailures;
+        boolean scanned;   // agent reported a net.scan from this IP (not windowed)
         long events;
         final Deque<Instant> failTimes = new ArrayDeque<>();   // auth failures, pruned to FAIL_WINDOW
         final Deque<Instant> eventTimes = new ArrayDeque<>();  // any events, pruned to ENUM_WINDOW
@@ -121,7 +122,7 @@ public final class ReportStore {
     // Event types the agent knows today (schema v2 catalog). Others are still stored, just counted separately.
     public static final Set<String> KNOWN_EVENT_TYPES = Set.of("file.change", "net.connection", "auth.failure",
             "auth.success", "samba.audit", "system.heartbeat", "system.source_unavailable",
-            "system.observation_gap", "log.entry", "system.unknown");
+            "system.observation_gap", "log.entry", "system.unknown", "auth.attempt", "net.scan");
 
     private final JsonlLog log;
     private final Object lock = new Object();
@@ -202,6 +203,15 @@ public final class ReportStore {
         Instant parsed = parse(text(n, "received_at"));
         final Instant at = parsed != null ? parsed : Instant.now();
         String operation = text(n, "operation");
+
+        // A port scan the agent already counted over its own window: mark the source, do not recount packets.
+        if ("net.scan".equals(eventType)) {
+            JsonNode src = event.get("src");
+            String ip = src != null ? text(src, "ip") : null;
+            if (ip != null) {
+                markScanner(ip, at);
+            }
+        }
 
         // Attacker from an observed inbound TCP connection (peer = the remote client).
         JsonNode conn = n.get("connection");
@@ -319,6 +329,18 @@ public final class ReportStore {
         }
     }
 
+    // Flags an IP the agent reported as a port scanner. Caller holds lock.
+    private void markScanner(String ip, Instant at) {
+        AttackerState s = attacker(ip, at);
+        if (s == null) {
+            return;
+        }
+        if (s.lastSeen == null || !at.isBefore(s.lastSeen)) {
+            s.lastSeen = at;
+        }
+        s.scanned = true;
+    }
+
     // Flags an IP from content signals (confirmed login, breadcrumb read). Caller holds lock.
     private void markAttacker(String ip, Instant at, boolean confirmed, boolean breadcrumb) {
         AttackerState s = attacker(ip, at);
@@ -348,7 +370,7 @@ public final class ReportStore {
                 int ports = (int) s.portTimes.values().stream().filter(t -> !t.isBefore(portCut)).count();
                 String threat = s.confirmed ? "confirmed"
                         : fails >= FAIL_THRESHOLD ? "brute_force"
-                        : ports >= PORT_SCAN_THRESHOLD ? "fast_enum"
+                        : (ports >= PORT_SCAN_THRESHOLD || s.scanned) ? "fast_enum"
                         : (s.authFailures > 0 || s.breadcrumbRead) ? "suspicious" : "contact";
                 out.add(new AttackerView(s.ip, s.mac, threat, iso(s.firstSeen), iso(s.lastSeen),
                         s.connections, s.authFailures, s.events, fails, evs, ports,

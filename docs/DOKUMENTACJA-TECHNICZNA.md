@@ -764,6 +764,24 @@ Adresy mogą występować w formatach `A.B.C.D`, `A.B.C.D:port`, `ipv4:A.B.C.D:p
 Możliwe wartości `mac_status`: `resolved`, `not_in_local_arp_cache`, `ambiguous_interfaces`, `ipv6_no_arp`, `invalid_ip`, `lookup_error`, `not_looked_up`.
 MAC jest widoczny tylko w obrębie jednej sieci L2; dla klienta zza routera jest `null`.
 
+#### 4.8a Hasła z prób SSH i skany portów (0.3.0)
+
+- **`auth.attempt`.** `scripts/hp-pam-log` (wywoływany z `pam_exec.so expose_authtok` w `/etc/pam.d/sshd`) zapisuje przez `logger`
+  linię `hp-pam: u=<base64 użytkownik> h=<rhost> p=<base64 hasło>` do `/var/log/secure`. Wpięcie w PAM ma uruchamiać hook
+  **tylko po nieudanym `pam_unix`**, więc hasło udanego logowania nie trafia do logu. Instalator robi to tylko przy
+  `HP_PAM_HOOK=yes` (niezweryfikowane na Almie; sonda: `docs/superpowers/plans/sonda-akceptacyjna-etap2.md`). Agent parsuje linię
+  w `event.c` (`parse_pam`): znacznik programu musi być 5. polem linii syslog (nazwa użytkownika w linii `sshd` jest kontrolowana
+  przez atakującego, więc podrobiona linia `hp-pam:` nie tworzy zdarzenia), base64 dekodowany ściśle, hasło obcinane do 256 bajtów.
+- **`net.scan`.** `firewall-cmd --set-log-denied=all` zapisuje odrzucone pakiety do `/var/log/messages`. W `poll_logs` (`monitor.c`)
+  linie z logu o nazwie `messages` trafiają najpierw do `hp_scan_feed` (`scan.c`): linia zapory (5. pole `kernel:`, `PROTO=TCP`,
+  `SRC=`, `DST=`, `DPT=`) jest **konsumowana i nie tworzy osobnego raportu**. Tracker liczy różne porty na źródło (tablica
+  1024 źródeł, wypieranie najstarszego); po 10 portach w 10 s powstaje jedno `net.scan`, a źródło jest wyciszane do końca okna
+  (`hp_scan_ack` po udanym zapisie raportu, więc nieudany zapis jest ponawiany). Linie jądra z `SRC=`/`DST=`/`PROTO=` innego protokołu niż TCP (UDP, ICMP, broadcasty) są konsumowane i nie liczą się do skanu, żeby
+  `--set-log-denied=all` nie zalewał serwera raportami. Skutek uboczny: pojedyncze odrzucone pakiety poniżej progu (i cały ruch
+  nie-TCP) nie zostawiają śladu. Wpięcie hooka w PAM robi `scripts/hp-pam-wire` (kopia z bieżącego pliku, weryfikacja przed
+  zapisem); zastępuje podstawkę `password-auth`, więc znikają m.in. `pam_sss` i `pam_faildelay` (sonda B9). Próg i okno to stałe w `scan.h` (bez konfiguracji w czasie działania); stan trackera
+  zeruje się przy zmianie źródeł logów (nowy monitor w `main.c`).
+
 ### 4.9 Połączenia TCP (`connections.c`)
 
 Co iterację (około 1 s) agent wysyła do jądra zapytanie netlink `NETLINK_SOCK_DIAG` / `SOCK_DIAG_BY_FAMILY` osobno dla `AF_INET` i `AF_INET6`

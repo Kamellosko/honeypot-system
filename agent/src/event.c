@@ -21,7 +21,92 @@ static int is_success(const unsigned char *c, size_t n) {
          has(c, n, "Accepted publickey");
 }
 
+static void copy_user(struct hp_event *e, const unsigned char *s, size_t n);
+
+/* Ostry dekoder base64 (alfabet standardowy, dlugosc % 4 == 0, '=' tylko na koncu); pusty napis to pusty wynik. */
+static int b64_value(unsigned char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  return c == '+' ? 62 : c == '/' ? 63 : -1;
+}
+
+static int b64_decode(const unsigned char *s, size_t n, unsigned char *out, size_t cap, size_t *outlen) {
+  size_t o = 0;
+  if (n % 4) return 0;
+  for (size_t i = 0; i < n; i += 4) {
+    int v[4], pad = 0;
+    for (int k = 0; k < 4; k++) {
+      unsigned char c = s[i + k];
+      if (c == '=') {
+        if (i + 4 != n || k < 2) return 0;
+        v[k] = 0; pad++;
+      } else {
+        if (pad || (v[k] = b64_value(c)) < 0) return 0;
+      }
+    }
+    unsigned val = (unsigned)v[0] << 18 | (unsigned)v[1] << 12 | (unsigned)v[2] << 6 | (unsigned)v[3];
+    if (o + 3 - pad > cap) return 0;
+    out[o++] = (unsigned char)(val >> 16);
+    if (pad < 2) out[o++] = (unsigned char)(val >> 8);
+    if (pad < 1) out[o++] = (unsigned char)val;
+  }
+  *outlen = o;
+  return 1;
+}
+
+#define PAM_DECODE_MAX 3072
+#define PASSWORD_MAX 256
+
+/* Linia hook-a PAM: "Mon DD HH:MM:SS host hp-pam: u=<b64 uzytkownik> h=<rhost> p=<b64 haslo>".
+   Znacznik programu musi byc 5. polem (atakujacy kontroluje nazwe uzytkownika w liniach sshd, ale nie ich znacznik).
+   Zwraca 1 dla poprawnej linii; gdy e != NULL, wypelnia user, src_ip i haslo. */
+static int parse_pam(const unsigned char *l, size_t n, struct hp_event *e) {
+  const unsigned char *tok[8];
+  size_t tlen[8];
+  size_t i = 0;
+  int count = 0;
+  while (i < n && count < 8) {
+    while (i < n && (l[i] == ' ' || l[i] == '\t' || l[i] == '\r' || l[i] == '\n')) i++;
+    size_t start = i;
+    while (i < n && l[i] != ' ' && l[i] != '\t' && l[i] != '\r' && l[i] != '\n') i++;
+    if (i == start) break;
+    tok[count] = l + start; tlen[count] = i - start; count++;
+  }
+  if (count != 8 || tlen[4] != 7 || memcmp(tok[4], "hp-pam:", 7)) return 0;
+  if (tlen[5] < 3 || memcmp(tok[5], "u=", 2) || tlen[6] < 2 || memcmp(tok[6], "h=", 2) ||
+      tlen[7] < 2 || memcmp(tok[7], "p=", 2)) return 0;
+  unsigned char user[PAM_DECODE_MAX], pw[PAM_DECODE_MAX];
+  size_t ulen = 0, plen = 0;
+  if (!b64_decode(tok[5] + 2, tlen[5] - 2, user, sizeof(user), &ulen) || !ulen) return 0;
+  if (!b64_decode(tok[7] + 2, tlen[7] - 2, pw, sizeof(pw), &plen)) return 0;
+  if (e) {
+    copy_user(e, user, ulen);
+    char host[INET6_ADDRSTRLEN];
+    size_t hl = tlen[6] - 2;
+    unsigned char probe[sizeof(struct in6_addr)];
+    if (hl > 0 && hl < sizeof(host)) {
+      memcpy(host, tok[6] + 2, hl);
+      host[hl] = 0;
+      if (inet_pton(AF_INET, host, probe) == 1 || inet_pton(AF_INET6, host, probe) == 1)
+        snprintf(e->src_ip, sizeof(e->src_ip), "%s", host);
+    }
+    e->has_password = 1;
+    e->password_len = plen > PASSWORD_MAX ? PASSWORD_MAX : plen;
+    memcpy(e->password, pw, e->password_len);
+  }
+  explicit_bzero(pw, sizeof(pw));
+  return 1;
+}
+
+static int is_pam(const unsigned char *c, size_t n) { return parse_pam(c, n, NULL); }
+
+static const unsigned char *first_line(const unsigned char *c, size_t n, int (*pred)(const unsigned char *, size_t),
+                                       size_t *len);
+
 const char *hp_classify(const char *operation, const unsigned char *content, size_t size) {
+  size_t pam_len;
+  if (first_line(content, size, is_pam, &pam_len)) return "authentication_attempt";
   if (is_failure(content, size)) return "authentication_failure";
   if (is_success(content, size)) return "authentication_success";
   if (has(content, size, "smbd_audit")) return "samba_audit";
@@ -48,6 +133,10 @@ static void copy_user(struct hp_event *e, const unsigned char *s, size_t n) {
   if (n > USER_MAX) n = USER_MAX;
   memcpy(e->user, s, n);
   e->user[n] = 0;
+  /* Nazwa moze pochodzic z base64 (hook PAM) albo byc ucieta w srodku znaku: JSON musi zostac poprawny,
+     a raport nie moze byc odrzucony przez serwer, wiec bajty spoza UTF-8 zamieniamy na '?'. */
+  if (!hp_valid_utf8((const unsigned char *)e->user, n))
+    for (size_t i = 0; i < n; i++) if ((unsigned char)e->user[i] & 0x80) e->user[i] = '?';
 }
 
 /* sshd: "Failed password for [invalid user ]NAME from IP port N" */
@@ -105,6 +194,14 @@ void hp_event_from_log(struct hp_event *e, const char *source, const char *opera
   const char *cls = hp_classify(operation, content, size);
   const unsigned char *line = NULL;
   size_t len = 0;
+  if (!strcmp(cls, "authentication_attempt")) {
+    set(e, "authentication", "auth.attempt", "medium");
+    e->outcome = "failure";
+    e->service = "ssh";
+    line = first_line(content, size, is_pam, &len);
+    if (line) parse_pam(line, len, e);
+    return;
+  }
   if (!strcmp(cls, "authentication_failure")) {
     set(e, "authentication", "auth.failure", "medium");
     e->outcome = "failure";
@@ -141,6 +238,18 @@ void hp_event_from_log(struct hp_event *e, const char *source, const char *opera
   struct hp_network_context ctx;
   hp_extract_ips(line, len, &ctx);
   if (ctx.count) snprintf(e->src_ip, sizeof(e->src_ip), "%s", ctx.ips[0]);
+}
+
+void hp_event_scan(struct hp_event *e, const struct hp_scan_hit *hit) {
+  memset(e, 0, sizeof(*e));
+  e->src_port = e->dst_port = -1;
+  e->outcome = "unknown";
+  set(e, "network", "net.scan", "medium");
+  snprintf(e->src_ip, sizeof(e->src_ip), "%s", hit->src_ip);
+  snprintf(e->dst_ip, sizeof(e->dst_ip), "%s", hit->dst_ip);
+  e->scan_ports = hit->ports;
+  e->scan_kind = hit->kind;
+  e->scan_window = hit->window_seconds;
 }
 
 void hp_event_file(struct hp_event *e, const char *action) {
@@ -186,5 +295,20 @@ void hp_event_write(FILE *out, const struct hp_event *e) {
   fputs(",\"dst\":", out); endpoint(out, e->dst_ip, e->dst_port, 0);
   fputs(",\"user\":", out);
   if (*e->user) { fputs("{\"name\":", out); str_or_null(out, e->user); fputc('}', out); } else fputs("null", out);
+  fputs(",\"credential\":", out);
+  if (!e->has_password) fputs("null", out);
+  else if (hp_valid_utf8(e->password, e->password_len)) {
+    fputs("{\"password\":", out); hp_json_string(out, e->password, e->password_len); fputc('}', out);
+  } else {
+    fputs("{\"password\":null,\"password_base64\":", out);
+    hp_json_base64(out, e->password, e->password_len);
+    fputc('}', out);
+  }
+  fputs(",\"detail\":", out);
+  if (e->scan_ports > 0) {
+    fprintf(out, "{\"ports\":%d,\"scan\":", e->scan_ports);
+    str_or_null(out, e->scan_kind);
+    fprintf(out, ",\"window_seconds\":%d}", e->scan_window);
+  } else fputs("null", out);
   fputc('}', out);
 }

@@ -16,6 +16,8 @@ final class EventValidator {
     private static final Set<String> SEVERITY = Set.of("info", "low", "medium", "high");
     private static final Set<String> OUTCOME = Set.of("success", "failure", "unknown");
     private static final int MAX_USER = 256;
+    private static final int MAX_PASSWORD = 1024;
+    private static final int MAX_PASSWORD_B64 = 4096;
 
     private EventValidator() {
     }
@@ -37,6 +39,41 @@ final class EventValidator {
                 throw new BadRequestResponse("invalid event.user.name");
             }
         }
+        credential(event.get("credential"));
+        detail(event.get("detail"));
+    }
+
+    // Optional password of an auth.attempt: {"password": text|null, "password_base64": text}.
+    private static void credential(JsonNode c) {
+        if (c == null || c.isNull()) {
+            return;
+        }
+        JsonNode pw = c.get("password");
+        JsonNode b64 = c.get("password_base64");
+        if (!c.isObject()
+                || (pw != null && !pw.isNull() && (!pw.isTextual() || pw.asText().length() > MAX_PASSWORD))
+                || (b64 != null && !b64.isNull() && (!b64.isTextual() || b64.asText().length() > MAX_PASSWORD_B64))) {
+            throw new BadRequestResponse("invalid event.credential");
+        }
+    }
+
+    // Optional detail of a net.scan: {"ports": int >= 1, "scan": name, "window_seconds": int >= 1}.
+    private static void detail(JsonNode d) {
+        if (d == null || d.isNull()) {
+            return;
+        }
+        JsonNode scan = d.get("scan");
+        if (!d.isObject()
+                || !positiveInt(d.get("ports"))
+                || !positiveInt(d.get("window_seconds"))
+                || (scan != null && !scan.isNull() && (!scan.isTextual() || !NAME.matcher(scan.asText()).matches()))) {
+            throw new BadRequestResponse("invalid event.detail");
+        }
+    }
+
+    // Absent or null passes; anything else must be an integer >= 1.
+    private static boolean positiveInt(JsonNode n) {
+        return n == null || n.isNull() || (n.isIntegralNumber() && n.canConvertToInt() && n.asInt() >= 1);
     }
 
     private static void requirePattern(JsonNode event, String field) {

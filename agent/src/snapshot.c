@@ -451,6 +451,18 @@ int hp_report_simple(struct hp_store *s, const char *source, const char *operati
   return report_end(s, out, filename);
 }
 
+int hp_report_scan(struct hp_store *s, const struct hp_scan_hit *hit) {
+  char filename[80];
+  FILE *out = report_begin(s, "network", "port_scan_detected", "", filename);
+  if (!out) return -1;
+  struct hp_event event;
+  hp_event_scan(&event, hit);
+  hp_event_write(out, &event);
+  fputs(",\"metadata\":{},\"analysis\":{\"classification\":\"port_scan\",\"actor\":null},"
+        "\"evidence\":[],\"content_changes\":null,\"complete\":true,\"error\":null", out);
+  return report_end(s, out, filename);
+}
+
 int hp_report_connection(struct hp_store *s, const char *local_ip, unsigned short local_port,
                           const char *peer_ip, unsigned short peer_port) {
   char filename[80];

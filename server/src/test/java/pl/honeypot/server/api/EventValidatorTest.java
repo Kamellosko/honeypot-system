@@ -59,6 +59,42 @@ class EventValidatorTest {
         assertThrows(BadRequestResponse.class, () -> validate(event("null", "{\"name\":\"" + name + "\"}", "low")));
     }
 
+    private static String attempt(String extra) {
+        return "{\"category\":\"authentication\",\"type\":\"auth.attempt\",\"severity\":\"medium\","
+                + "\"outcome\":\"failure\",\"service\":\"ssh\",\"action\":null,\"src\":null,\"dst\":null,"
+                + "\"user\":null" + extra + "}";
+    }
+
+    @Test
+    void acceptsCredentialAndDetailVariants() {
+        assertDoesNotThrow(() -> validate(attempt(",\"credential\":{\"password\":\"x\"},\"detail\":null")));
+        assertDoesNotThrow(() -> validate(attempt(",\"credential\":{\"password\":null,\"password_base64\":\"/w==\"}")));
+        assertDoesNotThrow(() -> validate(attempt(",\"credential\":null,\"detail\":null")));
+        assertDoesNotThrow(() -> validate(attempt(",\"credential\":{\"password\":\"\"}")));
+        assertDoesNotThrow(() -> validate(attempt(",\"detail\":{\"ports\":12,\"scan\":\"syn\",\"window_seconds\":10}")));
+    }
+
+    @Test
+    void rejectsBadCredential() {
+        assertThrows(BadRequestResponse.class, () -> validate(attempt(",\"credential\":\"x\"")));
+        assertThrows(BadRequestResponse.class, () -> validate(attempt(",\"credential\":{\"password\":5}")));
+        assertThrows(BadRequestResponse.class,
+                () -> validate(attempt(",\"credential\":{\"password\":\"" + "x".repeat(1025) + "\"}")));
+        assertThrows(BadRequestResponse.class,
+                () -> validate(attempt(",\"credential\":{\"password\":null,\"password_base64\":7}")));
+    }
+
+    @Test
+    void rejectsBadDetail() {
+        assertThrows(BadRequestResponse.class, () -> validate(attempt(",\"detail\":\"x\"")));
+        assertThrows(BadRequestResponse.class,
+                () -> validate(attempt(",\"detail\":{\"ports\":0,\"scan\":\"syn\",\"window_seconds\":10}")));
+        assertThrows(BadRequestResponse.class,
+                () -> validate(attempt(",\"detail\":{\"ports\":3,\"scan\":\"bad value!\",\"window_seconds\":10}")));
+        assertThrows(BadRequestResponse.class,
+                () -> validate(attempt(",\"detail\":{\"ports\":3,\"scan\":\"syn\",\"window_seconds\":0}")));
+    }
+
     @Test
     void rejectsMissingEvent() {
         assertThrows(BadRequestResponse.class, () -> EventValidator.validate(null));

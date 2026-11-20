@@ -80,7 +80,7 @@ Nasz system: **tylko SSH (22) i SMB (445/139)**.
 |---|---|---|
 | Liczba protokołów | ~20 | 2 |
 | Dodanie nowego protokołu | napisać klasę `CanaryService` (~50–150 linii; szablony w repo) | napisać usługę + rozszerzyć `config.c`/klasyfikację w agencie (C) |
-| Skan portów | **tak** (iptables: SYN, NULL/XMAS/FIN, nmap OS) | **nie** — netlink co 1 s nie widzi skanów SYN ani krótkich połączeń (luka znana, `dzialanie-systemu.md` 13.2/4) |
+| Skan portów | **tak** (iptables: SYN, NULL/XMAS/FIN, nmap OS) | **tak od 0.3.0** (`net.scan`: log zapory `firewalld`, próg 10 portów w 10 s; SYN/NULL/XMAS/FIN; **do potwierdzenia na Almie**). Wcześniej netlink nie widział skanów SYN (`dzialanie-systemu.md` 13.2/4) |
 | Wykrycie ruchu bocznego (LLMNR/NBNS/SMB) | LLMNR, SMB | SMB; NetBIOS + wsdd jako „szum" do odfiltrowania |
 
 **Ocena:** pod względem szerokości OpenCanary wygrywa bezdyskusyjnie. Dla atakującego w sieci wewnętrznej to ważne:
@@ -102,7 +102,7 @@ nie zobaczymy jego komend. Wersja banera konfigurowalna (`ssh.version`; domyśln
 
 | | OpenCanary | Nasz |
 |---|---|---|
-| Loguje login/hasło | **tak, każdą próbę** (pełne hasło) | tylko fakt i IP (`Failed password`); hasła z prób *nie są* rejestrowane przez sshd |
+| Loguje login/hasło | **tak, każdą próbę** (pełne hasło) | od 0.3.0 hook PAM (`auth.attempt`, tylko nieudane próby SSH; **niezweryfikowany na Almie**, domyślnie wyłączony). `sshd` sam haseł nie loguje; SMB: tylko nazwa użytkownika |
 | Komendy po zalogowaniu | nie (brak powłoki) | tak (auditd) |
 | Ryzyko dla maszyny | niskie (brak powłoki) | **realne**: `backup_srv` ma prawdziwy shell, potrzebny hardening i egress (otwarty punkt w `ustalenia-konfiguracja.md`) |
 | Informacja o atakującym | dane uwierzytelniające, wersja klienta SSH | cały przebieg ataku po wejściu |
@@ -257,8 +257,8 @@ Uporządkowane wg stosunku zysku do kosztu:
 | # | Luka | Jak robi to OpenCanary | Proponowane działanie | Koszt |
 |---|---|---|---|---|
 | 1 | **Brak powiadomień** | handlery Slack/Teams/SMTP/webhook | w serwerze Java: wysyłka webhooka przy wejściu IP na poziom ≥ `brute_force`/`confirmed` | niski |
-| 2 | **Brak haseł z prób** | loguje `USERNAME`/`PASSWORD` w każdej próbie SSH | rozważyć warstwę przechwytującą (np. `pam`-moduł/`auditd` jest niewystarczający; sshd nie loguje haseł) — albo uruchomić OpenCanary SSH na innym porcie jako kolektor kampanii | średni |
-| 3 | **Brak wykrywania skanów portów** | iptables `LOG` + parser (SYN/NULL/XMAS/FIN) | reguły nftables `log prefix` + odczyt logu jądra przez istniejący mechanizm monitorowania logów agenta | niski–średni |
+| 2 | ~~Brak haseł z prób~~ (etap 2, 0.3.0: hook PAM, do sondy na Almie) | loguje `USERNAME`/`PASSWORD` w każdej próbie SSH | rozważyć warstwę przechwytującą (np. `pam`-moduł/`auditd` jest niewystarczający; sshd nie loguje haseł) — albo uruchomić OpenCanary SSH na innym porcie jako kolektor kampanii | średni |
+| 3 | ~~Brak wykrywania skanów portów~~ (etap 2, 0.3.0: `net.scan` z logu `firewalld`, do sondy na Almie) | iptables `LOG` + parser (SYN/NULL/XMAS/FIN) | reguły nftables `log prefix` + odczyt logu jądra przez istniejący mechanizm monitorowania logów agenta | niski–średni |
 | 4 | **Wąski wachlarz usług** | ~20 modułów | dołożyć OpenCanary jako **tanie czujki** na portach: 21, 23, 80, 1433, 3306, 3389, 6379 (rdz. 12) | niski |
 | 5 | **Ignore-listy** | `ip.ignorelist`, `logtype.ignorelist` | lista IP „znane/dozwolone" w `server.properties` (skaner podatności, własne stacje) — pomoże też z szumem Windows | niski |
 | 6 | **Niestandaryzowany schemat typów** | numerowane `logtype` | tabela mapowania `source/operation/classification` → kody w dokumentacji API (dla SIEM) | niski |
