@@ -15,6 +15,7 @@ import pl.honeypot.server.api.AgentsHandler;
 import pl.honeypot.server.api.AttackersHandler;
 import pl.honeypot.server.api.EventsQueryHandler;
 import pl.honeypot.server.api.ReportHandler;
+import pl.honeypot.server.api.VersionHandler;
 import pl.honeypot.server.api.StatsHandler;
 import pl.honeypot.server.store.JsonlLog;
 import pl.honeypot.server.store.ReportStore;
@@ -77,6 +78,8 @@ public final class Main {
         app.get("/api/agents", new AgentsHandler(reports));
         app.get("/api/events", new EventsQueryHandler(reports));
         app.get("/api/stats", new StatsHandler(reports));
+        String version = Main.class.getPackage().getImplementationVersion();
+        app.get("/api/version", new VersionHandler(version != null ? version : "dev"));
         app.get("/api/attackers", new AttackersHandler(reports));
 
         app.start();
