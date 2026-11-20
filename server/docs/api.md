@@ -20,7 +20,7 @@ Wspólna koperta:
 
 | Pole | Typ | Opis |
 |------|-----|------|
-| `schema_version` | int | zawsze `1` |
+| `schema_version` | int | `1` (stary agent) lub `2` (obecny); serwer przyjmuje oba |
 | `report_id` | string | 64 znaki hex (lowercase), unikalny; transmisja bywa ponawiana |
 | `agent_id` | string | `[A-Za-z0-9._-]`, 1–64 znaków |
 | `observed_at` | string | czas zdarzenia UTC, `YYYY-MM-DDTHH:MM:SSZ` |
@@ -30,6 +30,22 @@ Wspólna koperta:
 | `analysis` | object | `{ "classification": ..., "actor": null }` |
 | `complete` | bool | czy raport jest kompletny |
 | `error` | string \| null | przyczyna niekompletności |
+| `agent_version` | string | tylko v2: wersja agenta (plik `VERSION`) |
+| `event` | object | tylko v2: ustandaryzowany opis zdarzenia, patrz niżej |
+
+Blok `event` (v2; schemat: [`docs/schema/event-v2.schema.json`](../../docs/schema/event-v2.schema.json), pola zbliżone do ECS):
+
+| Pole | Opis |
+|------|------|
+| `category`, `type` | `[A-Za-z0-9_.-]{1,64}`, np. `authentication` / `authentication_failure` |
+| `severity` | `info` \| `low` \| `medium` \| `high` |
+| `outcome` | `success` \| `failure` \| `unknown` |
+| `service`, `action` | string lub `null` |
+| `src`, `dst` | `{ip, port, mac}`; `mac` jest zawsze `null` (etap 1) |
+| `user` | `null` albo `{ "name": ... }` |
+
+Stare pola (`analysis.classification` itd.) zostają obok `event`. Serwer waliduje `event` w raportach v2 (zły blok → `400`)
+i liczy zdarzenia po `event.type` (`by_event_type` w `/api/stats`).
 
 Pola zależne od typu: `metadata`, `content_changes`, `evidence[]`, `connection{}`,
 `previous_path`, `content` / `content_base64`, `network_context`. Przykłady: `examples/report-*.json`.
@@ -91,6 +107,10 @@ Zdalne IP z połączeń TCP i nieudanych logowań, stopniowane po zachowaniu: `c
 Pola: `ip`, `mac`, `threat`, `first_seen`, `last_seen`, `connections`, `auth_failures`, `events`,
 `failures_10m`, `events_1m`, `distinct_ports`, `confirmed`, `breadcrumb_read`, `last_operation`.
 Szczegóły i progi: [`attacker-detection.md`](attacker-detection.md).
+
+## 6. Wersja (GET /api/version)
+
+`{"server_version": "...", "schema_versions": [1, 2]}`: wersja serwera i wersje schematu, które przyjmuje.
 
 ## Uwagi
 
