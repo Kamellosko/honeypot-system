@@ -5,6 +5,8 @@ INSTALL_BINARY ?= build/release/honeypot
 .DELETE_ON_ERROR:
 CFLAGS ?= -O2 -g
 CFLAGS += -std=c11 -Wall -Wextra -Werror
+VERSION_STR := $(shell tr -d '\n' < ../VERSION)
+CPPFLAGS += -DHP_VERSION='"$(VERSION_STR)"'
 # GCC 11 (AlmaLinux 9) supports _FORTIFY_SOURCE up to 2 and -Werror turns level 3 into an error.
 # On a newer toolchain (AlmaLinux 10, gcc-toolset-14) build with FORTIFY_LEVEL=3.
 FORTIFY_LEVEL ?= 2
@@ -14,7 +16,7 @@ INCLUDES = -Iinclude -Ithird_party/cJSON
 LDLIBS += -lcurl -lcrypto -ltdb -lpthread -lm
 SOURCES = src/main.c src/config.c src/monitor.c src/snapshot.c src/protocol.c src/port.c src/heartbeat.c src/network.c src/arp.c src/connections.c src/diff.c src/io.c
 TEST_COMMON = src/snapshot.c src/protocol.c
-TESTS = config snapshot binary monitor root_rebind rename_overwrite log protocol transport heartbeat network connections diff io
+TESTS = version config snapshot binary monitor root_rebind rename_overwrite log protocol transport heartbeat network connections diff io
 
 .PHONY: all check clean install release check-release install-release
 all: build/honeypot

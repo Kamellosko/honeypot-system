@@ -1,6 +1,9 @@
 #pragma once
 #include <stddef.h>
 
+#ifndef HP_VERSION
+#define HP_VERSION "unknown"
+#endif
 #ifndef AGENT_ID
 #define AGENT_ID "alma10-01"
 #endif
