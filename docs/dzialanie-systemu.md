@@ -4,6 +4,14 @@ Stan na 2026-10-23, na podstawie kodu w repozytorium (agent C, serwer Java, dash
 Wszystko poniżej wynika z czytania kodu; tam, gdzie nie sprawdziłem tego na żywej maszynie, jest to
 oznaczone jako **[do weryfikacji]**. Lista luk i ryzyk jest w rozdziale 13.
 
+> **Co jest aktualne, a co historyczne**
+> - Rozdziały 3–9 (agent) i 10–11 (serwer, dashboard) opisują kod i nadal się zgadzają.
+> - Rozdział 2 opisuje **starszą personę `fs01`** (`scripts/setup-samba-honeypot.sh`). Obowiązująca persona „Dział Finansów"
+>   (`samba_structure/`, z `full_audit` i okruszkiem `backup_srv`) jest opisana w [`WDROZENIE-OD-ZERA.md`](WDROZENIE-OD-ZERA.md)
+>   i [`../samba_structure/ustalenia-konfiguracja.md`](../samba_structure/ustalenia-konfiguracja.md).
+> - Rozdział 13 (luki) jest z 2026-10-23, naprawione punkty są w nim oznaczone.
+> - Wykrywanie atakujących (`/api/attackers`) powstało później: [`../server/docs/attacker-detection.md`](../server/docs/attacker-detection.md).
+
 ---
 
 ## 1. Obraz całości
@@ -27,7 +35,7 @@ zamienia w raport JSON, zapisuje go trwale na dysku, a potem wysyła HTTPS-em do
                         │                                   │ 127.0.0.1:8443         │
                         │ sysmon-collector (Java, user sysmon)◄┘                     │
                         │   ├─ dedup po report_id ─► /var/lib/sysmon/events.jsonl    │
-                        │   └─ /api/{agents,events,stats} + dashboard (statyczny) │
+                        │   └─ /api/{agents,events,stats,attackers} + dashboard    │
                         └────────────────────────────────────────────────────────────┘
         dashboard: tylko przez tunel SSH (ssh -L 8443:127.0.0.1:8443)
         kopia dowodów poza maszynę: sync-events.sh (rsync po SSH, cron)
@@ -42,14 +50,17 @@ maszyny — to jedyna kopia poza H.
 ### Podział odpowiedzialności
 | Warstwa | Co robi | Czego **nie** robi |
 |---|---|---|
-| Samba (`setup-samba-honeypot.sh`) | Wabik: udziały, konta, pliki, logi uwierzytelniania | Nie ma audytu operacji na plikach (brak `vfs_full_audit`) |
+| Samba (`setup-samba-honeypot.sh`; w wariancie „Dział Finansów” `samba_structure/`) | Wabik: udziały, konta, pliki, logi uwierzytelniania | Wariant `fs01` nie ma audytu plików; wariant „Dział Finansów” ma `full_audit` |
 | Agent (C) | Wykrywa zdarzenia, robi migawki i diffy, kolejkuje i wysyła | Nie ocenia, kto jest atakującym (`actor` zawsze `null`) |
-| Serwer (Java) | Waliduje, deduplikuje, dopisuje do logu, udostępnia API | Nie koreluje zdarzeń, nie uwierzytelnia agentów |
-| Dashboard (JS) | Odświeża co 4 s, koloruje, pokazuje surowy JSON | Nie koreluje, nie alarmuje |
+| Serwer (Java) | Waliduje, deduplikuje, dopisuje do logu, udostępnia API, stopniuje atakujących (`/api/attackers`) | Nie uwierzytelnia agentów ani klientów API |
+| Dashboard (JS) | Odświeża co 4 s, koloruje, pokazuje surowy JSON | Nie alarmuje |
 
 ---
 
 ## 2. Maszyna-wabik (co widzi atakujący)
+
+> Ten rozdział opisuje starszy wariant `fs01`. Wariant „Dział Finansów” (hostname `fs-finanse`, udziały `Wspolny`, `Finanse`,
+> `Archiwum$`, `Zarzad`, `full_audit`, konto-przynęta `backup_srv`) jest w `samba_structure/ustalenia-konfiguracja.md`.
 
 Źródło: `scripts/setup-samba-honeypot.sh`, `scripts/setup-persona.sh`.
 
@@ -390,7 +401,7 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
    (`from 192.168.1.5 port …`) i w `A.B.C.D:port`: 1 adres. Skutek: raporty `authentication_failure` z Samby mają puste `network_context`
    (nie ma IP ani MAC w samym raporcie). IP trzeba dopasować ręcznie po czasie z raportem `tcp_connection_observed`.
    Test jednostkowy (`network_test.c`) tego formatu nie obejmuje. Format linii podałem z pamięci o Sambie **[do weryfikacji na żywym logu z H]**.
-2. **Brak audytu operacji na plikach w Sambie.** `smb.conf` z naszego skryptu nie ma `vfs objects = full_audit`, a poziom logów `1 auth:3 auth_audit:3`
+2. **Brak audytu operacji na plikach w Sambie** *(dotyczy wariantu `fs01`; w wariancie „Dział Finansów” `full_audit` jest włączony, a agent klasyfikuje linie `smbd_audit[PID]:` jako `samba_audit`)*. `smb.conf` z naszego skryptu nie ma `vfs objects = full_audit`, a poziom logów `1 auth:3 auth_audit:3`
    nie loguje otwarć ani nazw plików. Skutki: (a) `evidence[]` przy zmianach plików będzie puste (szuka nazwy pliku w ostatnich 60 s logów);
    (b) klasyfikacja `samba_audit` nigdy się nie włączy; (c) odczyt/pobranie pliku (wykradanie `hasla_stare.csv`) w ogóle nie zostawia śladu —
    agent nie obserwuje `IN_OPEN`/`IN_ACCESS`, a Samba tego nie loguje. Agent jest już gotowy na `smbd_audit:` w syslogu
@@ -406,14 +417,14 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
 6. **Serwer bez uwierzytelniania**: każdy, kto dotrze do `127.0.0.1:8443` (czyli atakujący z shellem na H), może wstrzyknąć fałszywe raporty
    i czytać wszystko przez API (raporty zawierają treść plików i logów). Zewnętrznie chroni tylko bind na loopback i brak reguły w firewallu.
    Projekt (`projekt_honeypot.md` w tym katalogu) przewiduje token / mTLS, ale nie jest to zaimplementowane.
-7. **Skalowanie serwera**: każde zapytanie `GET /api/events` czyta i parsuje **cały** `events.jsonl`; dashboard robi to co 4 s.
-   Przy dużym ruchu logów (jedna linia = jeden raport) plik szybko rośnie. Zbiór `report_id` też rośnie w pamięci bez limitu.
+7. **Skalowanie serwera**: `GET /api/events` czyta plik od końca (naprawione), ale `events.jsonl` rośnie bez rotacji (jedna linia logu = jeden raport),
+   a zbiór `report_id` rośnie w pamięci bez limitu.
 8. **Walidacja ID**: agent dopuszcza `--id` do 64 znaków ASCII drukowalnych, serwer tylko `[A-Za-z0-9._-]{1,64}`. ID z innymi znakami → 400 → wszystkie raporty
    lądują jako `.rejected` (od tej wersji nie liczą się już do limitu kolejki). Domyślne `fs01`/`alma10-01` są poprawne.
 9. **Wydajność wysyłki**: nowy handshake TLS na każdy raport, kolejność `readdir`. Przy zalewie linii logu kolejka może narastać do limitu 10 000.
    Dodatkowo `hp_store_pending_count` liczy pliki zawierające `.json` w nazwie — także `*.json.rejected` i pliki tymczasowe — a `.rejected`
    nigdy nie są czyszczone, więc potrafią w końcu zająć limit kolejki.
-10. **Nieobecność wykrywania wzorców**: żadnej korelacji ani progów (np. N prób logowania z jednego IP) — klasyfikacja jest tylko podciągowa.
+10. **Nieobecność wykrywania wzorców** *(częściowo rozwiązane)*: agent nadal klasyfikuje tylko po podciągach, ale serwer stopniuje IP w `/api/attackers` (progi, okruszek). Zdarzeń z plików z logowaniami nadal nie koreluje.
 
 ### 13.3 Niskie / porządkowe
 11. Dashboard koloruje klasyfikacje `observation_gap`, `delete`, `downtime_change`, ale agent emituje je jako **operacje**, a klasyfikacja bywa `unknown` —
