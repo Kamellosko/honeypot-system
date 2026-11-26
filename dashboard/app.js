@@ -116,9 +116,10 @@ function eventTone(r) {
 // Threat levels from /api/attackers, most serious first.
 const THREATS = {
   confirmed: { label: "POTWIERDZONY", tone: "danger", hint: "zalogował się na konto-wabik" },
+  bait: { label: "PRZYNĘTA", tone: "danger", hint: "próba na konto-przynętę albo odczyt pliku-przynęty" },
   brute_force: { label: "BRUTE FORCE", tone: "danger", hint: "5+ nieudanych logowań w 10 min" },
   fast_enum: { label: "SKANER", tone: "warn", hint: "skan portów albo 3+ porty w minutę" },
-  suspicious: { label: "PODEJRZANY", tone: "warn", hint: "nieudane logowanie, sonda usługi, nieistniejące konto albo przynęta" },
+  suspicious: { label: "PODEJRZANY", tone: "warn", hint: "nieudane logowanie, sonda usługi albo nieistniejące konto" },
   contact: { label: "kontakt", tone: "info", hint: "samo połączenie" },
 };
 
@@ -279,6 +280,7 @@ function renderAttackers(list) {
     const signals = [];
     if (a.confirmed) signals.push("logowanie na wabik");
     if (a.breadcrumb_read) signals.push("odczyt przynęty");
+    if (a.decoy_attempt) signals.push("próba na konto-przynętę");
     if (a.distinct_ports >= 3) signals.push(`${esc(a.distinct_ports)} porty/min`);
     if (a.threat === "fast_enum" && a.distinct_ports < 3) signals.push("skan portów");
     if (a.probed) signals.push("sonda usługi");

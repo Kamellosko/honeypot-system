@@ -8,6 +8,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -73,6 +74,9 @@ public final class ReportStore {
         boolean breadcrumbRead;   // read a file containing the breadcrumb marker
         boolean probed;           // service probe without a valid banner (net.probe, e.g. nmap -sV)
         long invalidUsers;        // logins to accounts that do not exist (auth.invalid_user)
+        boolean decoyAttempt;     // tried to log in to a decoy account (confirmAccounts), even with a wrong password
+        String alertedLevel;      // highest level already reported (mailed, or seen while replaying history)
+        final Deque<AlertNotice.Recent> recent = new ArrayDeque<>();   // newest first, at most RECENT_MAX
     }
 
     // Snapshot of an agent for GET /api/agents.
@@ -118,7 +122,8 @@ public final class ReportStore {
             @JsonProperty("breadcrumb_read") boolean breadcrumbRead,
             @JsonProperty("last_operation") String lastOperation,
             @JsonProperty("probed") boolean probed,
-            @JsonProperty("invalid_users") long invalidUsers) {
+            @JsonProperty("invalid_users") long invalidUsers,
+            @JsonProperty("decoy_attempt") boolean decoyAttempt) {
     }
 
     // Successful SSH login line; a login to one of confirmAccounts means the attacker used the breadcrumb password.
@@ -131,8 +136,15 @@ public final class ReportStore {
             "system.observation_gap", "log.entry", "system.unknown", "auth.attempt", "net.scan",
             "auth.invalid_user", "auth.denied", "net.probe");
 
+    // Levels worth an e-mail; lower ones (suspicious, contact) are mostly noise on a local network.
+    public static final Set<String> ALERT_LEVELS = Set.of("fast_enum", "brute_force", "bait", "confirmed");
+    private static final Set<String> AUTH_TYPES = Set.of("auth.failure", "auth.invalid_user", "auth.attempt");
+    private static final int RECENT_MAX = 10;
+
     private final JsonlLog log;
     private final Object lock = new Object();
+    private volatile AlertSink alertSink;
+    private final Set<String> touched = new LinkedHashSet<>();   // attacker IPs changed by the current index(); under lock
     private final Set<String> confirmAccounts;
     private final String breadcrumbMarker;
 
@@ -162,7 +174,7 @@ public final class ReportStore {
                 if (reportId != null) {
                     seen.add(reportId);
                 }
-                index(n);
+                index(n, false);   // history: remember levels, never mail
             });
         }
     }
@@ -185,13 +197,20 @@ public final class ReportStore {
             if (reportId != null) {
                 seen.add(reportId);
             }
-            index(stamped);   // liveness uses the server's received_at, not the agent's
+            index(stamped, true);   // liveness uses the server's received_at, not the agent's
             return new InsertResult(stamped.get("event_id").asLong(), false, false);
         }
     }
 
+    // Sends escalations to sink from now on; null stops them. Reports already stored are never re-sent.
+    public void setAlertSink(AlertSink sink) {
+        this.alertSink = sink;
+    }
+
     // Updates liveness and counters for one accepted report. Caller holds lock.
-    private void index(JsonNode n) {
+    // notify=false while replaying history: levels are remembered as reported, nothing is sent.
+    private void index(JsonNode n, boolean notify) {
+        touched.clear();
         totalEvents++;
         bump(bySource, text(n, "source"));
         bump(byOperation, capKey(byOperation, text(n, "operation")));
@@ -260,6 +279,20 @@ public final class ReportStore {
             }
         }
 
+        // A login attempt on a decoy account means the attacker already found the breadcrumb.
+        if (eventType != null && AUTH_TYPES.contains(eventType)) {   // Set.of rejects contains(null)
+            JsonNode user = event.get("user");
+            String name = user != null ? text(user, "name") : null;
+            JsonNode src = event.get("src");
+            String ip = src != null ? text(src, "ip") : null;
+            if (name != null && ip != null && confirmAccounts.contains(name)) {
+                AttackerState s = attacker(ip, at);
+                if (s != null) {
+                    s.decoyAttempt = true;
+                }
+            }
+        }
+
         // Confirmed login / breadcrumb read parsed from raw log content.
         String content = text(n, "content");
         if (content != null) {
@@ -275,6 +308,8 @@ public final class ReportStore {
         }
 
         String agentId = text(n, "agent_id");
+        remember(event, at);
+        escalate(agentId, at, notify);
         if (agentId == null) {
             return;
         }
@@ -317,8 +352,52 @@ public final class ReportStore {
         if (s.firstSeen == null || at.isBefore(s.firstSeen)) {
             s.firstSeen = at;
         }
+        touched.add(ip);
         return s;
     }
+
+    // Adds the event to its source's recent list (only what the mail may show: no password, no raw text).
+    private void remember(JsonNode event, Instant at) {
+        JsonNode src = event != null ? event.get("src") : null;
+        String ip = src != null ? text(src, "ip") : null;
+        AttackerState s = ip != null && touched.contains(ip) ? attackers.get(ip) : null;
+        if (s == null) {
+            return;
+        }
+        JsonNode user = event.get("user");
+        JsonNode port = src.get("port");
+        s.recent.addFirst(new AlertNotice.Recent(iso(at), text(event, "type"), text(event, "service"),
+                user != null ? text(user, "name") : null,
+                port != null && port.canConvertToInt() ? port.asInt() : null));
+        while (s.recent.size() > RECENT_MAX) {
+            s.recent.removeLast();
+        }
+    }
+
+    // Reports every touched attacker whose level rose above the one already reported. Caller holds lock.
+    private void escalate(String agentId, Instant at, boolean notify) {
+        for (String ip : touched) {
+            AttackerState s = attackers.get(ip);
+            if (s == null) {
+                continue;
+            }
+            String level = threatOf(s, at);
+            if (!ALERT_LEVELS.contains(level) || rank(level) <= rank(s.alertedLevel)) {
+                continue;
+            }
+            s.alertedLevel = level;
+            AlertSink sink = alertSink;
+            if (notify && sink != null) {
+                sink.escalated(new AlertNotice(agentId, view(s, at), REASONS.get(level), List.copyOf(s.recent)));
+            }
+        }
+    }
+
+    private static final Map<String, String> REASONS = Map.of(
+            "fast_enum", "skan portów albo 3+ porty w minutę",
+            "brute_force", "5+ nieudanych logowań w 10 min",
+            "bait", "próba logowania na konto-przynętę albo odczyt pliku-przynęty",
+            "confirmed", "udane logowanie na konto-przynętę");
 
     // Records one attacker observation. Caller holds lock. Loopback is skipped so
     // the agent's own upload/tunnel traffic on 127.0.0.1 is not counted.
@@ -405,18 +484,7 @@ public final class ReportStore {
         List<AttackerView> out = new ArrayList<>();
         synchronized (lock) {
             for (AttackerState s : attackers.values()) {
-                int fails = countSince(s.failTimes, now.minus(FAIL_WINDOW));
-                int evs = countSince(s.eventTimes, now.minus(ENUM_WINDOW));
-                Instant portCut = now.minus(ENUM_WINDOW);
-                int ports = (int) s.portTimes.values().stream().filter(t -> !t.isBefore(portCut)).count();
-                String threat = s.confirmed ? "confirmed"
-                        : fails >= FAIL_THRESHOLD ? "brute_force"
-                        : (ports >= PORT_SCAN_THRESHOLD || s.scanned) ? "fast_enum"
-                        : (s.authFailures > 0 || s.breadcrumbRead || s.probed || s.invalidUsers > 0) ? "suspicious"
-                        : "contact";
-                out.add(new AttackerView(s.ip, s.mac, threat, iso(s.firstSeen), iso(s.lastSeen),
-                        s.connections, s.authFailures, s.events, fails, evs, ports,
-                        s.confirmed, s.breadcrumbRead, s.lastOperation, s.probed, s.invalidUsers));
+                out.add(view(s, now));
             }
         }
         out.sort((x, y) -> {
@@ -426,9 +494,36 @@ public final class ReportStore {
         return out;
     }
 
+    // Level of one attacker at a given moment (the windows are counted back from 'now'). Caller holds lock.
+    private static String threatOf(AttackerState s, Instant now) {
+        int fails = countSince(s.failTimes, now.minus(FAIL_WINDOW));
+        return s.confirmed ? "confirmed"
+                : (s.decoyAttempt || s.breadcrumbRead) ? "bait"
+                : fails >= FAIL_THRESHOLD ? "brute_force"
+                : (distinctPorts(s, now) >= PORT_SCAN_THRESHOLD || s.scanned) ? "fast_enum"
+                : (s.authFailures > 0 || s.probed || s.invalidUsers > 0) ? "suspicious"
+                : "contact";
+    }
+
+    private static int distinctPorts(AttackerState s, Instant now) {
+        Instant cut = now.minus(ENUM_WINDOW);
+        return (int) s.portTimes.values().stream().filter(t -> !t.isBefore(cut)).count();
+    }
+
+    private static AttackerView view(AttackerState s, Instant now) {
+        return new AttackerView(s.ip, s.mac, threatOf(s, now), iso(s.firstSeen), iso(s.lastSeen),
+                s.connections, s.authFailures, s.events, countSince(s.failTimes, now.minus(FAIL_WINDOW)),
+                countSince(s.eventTimes, now.minus(ENUM_WINDOW)), distinctPorts(s, now),
+                s.confirmed, s.breadcrumbRead, s.lastOperation, s.probed, s.invalidUsers, s.decoyAttempt);
+    }
+
     private static int rank(String threat) {
+        if (threat == null) {
+            return -1;
+        }
         return switch (threat) {
-            case "confirmed" -> 4;
+            case "confirmed" -> 5;
+            case "bait" -> 4;
             case "brute_force" -> 3;
             case "fast_enum" -> 2;
             case "suspicious" -> 1;
