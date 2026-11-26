@@ -19,7 +19,7 @@ Nasz system: gałąź `main`, commit `281007f` + zmiany robocze.
 | Szerokość | ~20 protokołów (FTP, HTTP(S), SSH, Telnet, SMB, MySQL, MSSQL, Redis, MongoDB, RDP, VNC, SNMP, SIP, NTP, TFTP, Git, proxy, LLMNR, TCP-banner, skan portów) | 2 usługi: SSH + SMB (+ rejestrowanie TCP na 22/139/445) |
 | Głębia interakcji | płytka: loguje próbę (login/hasło/komenda), zwykle odrzuca | **głęboka**: atakujący dostaje prawdziwe pliki i (po okruszku) prawdziwą powłokę; widzimy zmiany plików z diffem |
 | Wdrożenie | `pip install` / Docker, 1 plik JSON | skrypty + C + Java + certyfikaty + persona (instrukcja ~400 linii) |
-| Alerty | gotowe: e-mail, Slack, Teams, webhook, syslog, hpfeeds, SMS (przez correlator) | brak aktywnych alertów; dashboard odświeżany co 4 s |
+| Alerty | gotowe: e-mail, Slack, Teams, webhook, syslog, hpfeeds, SMS (przez correlator) | e-mail (SMTP) przy wejściu IP na poziom skaner / brute force / przynęta / potwierdzony; dashboard odświeżany co 4 s |
 | Skala | wiele kanarków, wspólna konsola (Thinkst Canary — komercyjnie) | 1 maszyna, 1 kolektor lokalny |
 | Dojrzałość | wieloletni projekt, CI, testy integracyjne na moduł, PyPI, Docker | młody projekt, bardzo gruntowne testy agenta (C), niewdrożony produkcyjnie |
 | Licencja | BSD | brak pliku LICENSE w repo |
@@ -166,19 +166,20 @@ agreguje zdarzenia (np. `scans.network_portscan_horizon`).
 
 ### 6.2 Nasz system
 
-Brak aktywnych powiadomień. Serwer **stopniuje** atakujących w `/api/attackers` (`contact` → `suspicious` → `fast_enum` →
-`brute_force` → `confirmed`) z progami (≥5 nieudanych logowań/10 min, ≥3 porty/60 s) i **okruszkiem** (odczyt `kopia_zapasowa.sh` →
-udane SSH jako `backup_srv` = pewny atak). Analityk musi zajrzeć na dashboard (tunel SSH).
+Serwer **stopniuje** atakujących w `/api/attackers` (`contact` → `suspicious` → `fast_enum` → `brute_force` → `bait` → `confirmed`)
+z progami (≥5 nieudanych logowań/10 min, ≥3 porty/60 s, `net.scan` od agenta) i **okruszkiem** (odczyt `kopia_zapasowa.sh` albo próba
+na `backup_srv` = `bait`; udane SSH jako `backup_srv` = pewny atak). Przy wejściu IP na `fast_enum` i wyżej serwer wysyła **e-mail**
+(SMTP, jeden kanał; limit 60/h, bez maili za szum pojedynczych prób).
 
 | | OpenCanary | Nasz |
 |---|---|---|
-| Powiadomienia push | **tak, wiele kanałów** | **nie** |
+| Powiadomienia push | **tak, wiele kanałów** | **e-mail** (jeden kanał) |
 | Wyciszanie szumu | `ip.ignorelist`, `logtype.ignorelist` | filtr pętli zwrotnej; szum Windows (NetBIOS/wsdd) to otwarty temat |
 | Korelacja | zewnętrzny correlator | **wbudowana**, ale prosta (progi + okruszek) |
 | Poziom pewności „to na pewno atak" | zakładany z definicji (nikt nie powinien dotykać kanarka) | **jawny**: `confirmed` tylko po okruszku; reszta stopniowana |
 
-**Ocena:** OpenCanary wygrywa w „dowiem się od razu" (gotowe kanały). My wygrywamy w „rozumiem, jak groźne to jest"
-(stopniowanie, okruszek), ale brakuje nam ostatniego kilometra — **powiadomienia**. To najtańsza luka do załatania (rozdz. 8).
+**Ocena:** OpenCanary wygrywa liczbą kanałów (Slack, Teams, webhook, SMS). My wygrywamy w „rozumiem, jak groźne to jest"
+(stopniowanie, okruszek), a od etapu 3 mamy też ostatni kilometr: alarm e-mail przy groźnych poziomach.
 
 ---
 
@@ -256,7 +257,7 @@ Uporządkowane wg stosunku zysku do kosztu:
 
 | # | Luka | Jak robi to OpenCanary | Proponowane działanie | Koszt |
 |---|---|---|---|---|
-| 1 | **Brak powiadomień** | handlery Slack/Teams/SMTP/webhook | w serwerze Java: wysyłka webhooka przy wejściu IP na poziom ≥ `brute_force`/`confirmed` | niski |
+| 1 | ~~Brak powiadomień~~ (etap 3: e-mail przy wejściu IP na `fast_enum`/`brute_force`/`bait`/`confirmed`) | handlery Slack/Teams/SMTP/webhook | inne kanały (webhook/Slack) tylko w razie potrzeby | niski |
 | 2 | ~~Brak haseł z prób~~ (etap 2, 0.3.0: hook PAM, do sondy na Almie) | loguje `USERNAME`/`PASSWORD` w każdej próbie SSH | rozważyć warstwę przechwytującą (np. `pam`-moduł/`auditd` jest niewystarczający; sshd nie loguje haseł) — albo uruchomić OpenCanary SSH na innym porcie jako kolektor kampanii | średni |
 | 3 | ~~Brak wykrywania skanów portów~~ (etap 2, 0.3.0: `net.scan` z logu `firewalld`, do sondy na Almie) | iptables `LOG` + parser (SYN/NULL/XMAS/FIN) | reguły nftables `log prefix` + odczyt logu jądra przez istniejący mechanizm monitorowania logów agenta | niski–średni |
 | 4 | **Wąski wachlarz usług** | ~20 modułów | dołożyć OpenCanary jako **tanie czujki** na portach: 21, 23, 80, 1433, 3306, 3389, 6379 (rdz. 12) | niski |

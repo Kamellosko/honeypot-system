@@ -699,9 +699,29 @@ Cały „silnik wykrywania" po stronie agenta to szukanie podciągów w treści 
 |---|---|
 | `authentication_failure` | `Failed password`, `NT_STATUS_LOGON_FAILURE`, `NT_STATUS_WRONG_PASSWORD` lub `NT_STATUS_NO_SUCH_USER` |
 | `authentication_success` | `status [NT_STATUS_OK]`, `Accepted password` lub `Accepted publickey` |
+| `access_denied` | `NT_STATUS_ACCESS_DENIED` poza liniami `smbd_audit` (Samba odmówiła dostępu) |
+| `invalid_user` | `Invalid user <nazwa> from <IP>` (sshd: konto nie istnieje) |
+| `service_probe` | `Did not receive identification string from`, `banner exchange: Connection from`, `kex_exchange_identification:` (połączenie z portem 22 bez rozmowy po SSH, np. `nmap -sV`) |
 | `samba_audit` | `smbd_audit` (linie `full_audit` z syslogu i `audit.log`) |
 | `heartbeat` | operacja `heartbeat` |
 | `unknown` | wszystko inne |
+
+Kolejność sprawdzania (`hp_classify` w `agent/src/event.c`): linia hooka PAM, `authentication_failure`, `authentication_success`,
+`access_denied`, `invalid_user`, `service_probe`, `samba_audit`, `heartbeat`. Linia z hasłem wygrywa więc z `Invalid user` z tej samej próby.
+Fragment kodu powyżej pokazuje pierwotną wersję z `snapshot.c`; obecnie klasyfikacja jest w `event.c`.
+
+Odpowiadające typy w bloku `event` (schema v2):
+
+| Klasyfikacja | `event.type` | `event.service` | Uwagi |
+|---|---|---|---|
+| `authentication_failure` | `auth.failure` | `ssh` / `smb` | serwis z treści linii (`NT_STATUS`/`smbd` → `smb`) |
+| `authentication_success` | `auth.success` | `ssh` / `smb` | |
+| `access_denied` | `auth.denied` | `smb` | użytkownik z `user [DOMENA]\[nazwa]` |
+| `invalid_user` | `auth.invalid_user` | `ssh` | nie liczy się jako nieudane logowanie (linia `Failed password` przychodzi osobno) |
+| `service_probe` | `net.probe` | `ssh` | IP brany po **ostatnim** ` from `; linia `kex_exchange_identification` nie ma IP (na Almie 10 adres jest w następnej linii, nie jest jeszcze łączony) |
+
+Adres i port źródłowy przy `Invalid user` i sondzie są brane po ostatnim ` from ` w linii, bo nazwę użytkownika podaje atakujący
+i może ona zawierać fałszywe ` from <IP>`.
 
 Raporty „proste" (`hp_report_simple`) mają w `analysis` tylko pole `classification`; raporty zmian plików mają także `"actor": null`.
 
@@ -1163,8 +1183,18 @@ Plik `.properties` jako pierwszy argument (domyślnie `config/server.properties`
 | `server.keystore.password` | **wymagane, niepuste** | hasło keystore |
 | `data.dir` | `data` | katalog `events.jsonl` (tworzony przy starcie) |
 | `dashboard.dir` | `../dashboard` | katalog statycznego dashboardu; pusty lub nieistniejący = nie serwuj |
-| `detection.confirm.accounts` | `backup_srv` | konta-przynęty; udane logowanie = `confirmed` |
+| `detection.confirm.accounts` | `backup_srv` | konta-przynęty; udane logowanie = `confirmed`, każda próba = `bait` |
 | `detection.breadcrumb.marker` | `kopia_zapasowa.sh` | fragment treści logu oznaczający odczyt okruszka |
+| `alert.enabled` | `false` | alarmy e-mail (rozdz. 7.6) |
+| `alert.smtp.host` | **wymagany przy `alert.enabled=true`** | serwer SMTP (laboratorium: przekaźnik na hoście, `192.168.56.1`) |
+| `alert.smtp.port` | `25` | |
+| `alert.smtp.starttls` | `false` | `true` = wymagaj STARTTLS |
+| `alert.smtp.user`, `alert.smtp.password` | puste | logowanie do serwera SMTP; puste = bez logowania |
+| `alert.from` | **wymagany przy `alert.enabled=true`** | nadawca |
+| `alert.to` | **wymagany przy `alert.enabled=true`** | odbiorcy po przecinku |
+| `alert.max_per_hour` | `60` | limit maili na godzinę |
+
+`scripts/install-server-service.sh` przepisuje `collector.properties` przy każdej instalacji, ale zachowuje linie `alert.*`.
 
 
 *`server/src/main/java/pl/honeypot/server/ServerConfig.java`, linie 27–61*
@@ -1550,8 +1580,9 @@ Wszystkie endpointy `GET /api/*` są tylko do odczytu i **bez uwierzytelniania**
 |---|---|
 | `GET /api/agents` | lista agentów: `agent_id`, `status` (`online` gdy ostatni raport nie starszy niż 90 s), `first_seen`, `last_seen`, `total_reports`, `last_source`, `last_operation`, `last_classification` |
 | `GET /api/events?agent_id=&source=&limit=` | pełne raporty z `event_id` i `received_at`, od najnowszych; `limit` domyślnie 100, maks. 1000 (większy jest obcinany), `limit < 1` lub nie liczba daje 400 |
-| `GET /api/stats` | `total_events`, `total_agents`, `online_agents`, `by_source`, `by_classification`, `by_operation` |
+| `GET /api/stats` | `total_events`, `total_agents`, `online_agents`, `by_source`, `by_classification`, `by_operation`, `by_event_type`, `by_event_kind` (klucz `typ/serwis`, np. `auth.failure/ssh`, albo sam typ, gdy zdarzenie nie ma serwisu), `unknown_event_types` |
 | `GET /api/attackers` | wykryci atakujący (rozdz. 7) |
+| `GET /api/version` | `server_version`, obsługiwane `schema_versions` |
 
 `agents()` i `stats()` nie biorą blokady (współbieżna mapa i pola `volatile`), więc nie czekają na `fsync` zapisu.
 
@@ -1633,6 +1664,13 @@ więc **każde zdalne IP** widziane w połączeniach lub nieudanych logowaniach 
 | `classification: authentication_failure` | `network_context.endpoints[0].ip` | nieudane logowanie |
 | treść logu (`content`) | regex `Accepted (password\|publickey) for <konto> from <IPv4>` | udane logowanie SSH; jeśli konto jest w `detection.confirm.accounts` → `confirmed` |
 | treść logu zawierająca `detection.breadcrumb.marker` | IP z `endpoints[0]` | flaga `breadcrumb_read` |
+| `event.type: auth.denied` | `event.src.ip` | nieudane logowanie (jak `authentication_failure`) |
+| `event.type: net.scan` | `event.src.ip` | flaga `scanned` (skan wykryty przez agenta) |
+| `event.type: net.probe` | `event.src.ip` | flaga `probed` (nie jest nieudanym logowaniem ani połączeniem) |
+| `event.type: auth.invalid_user` | `event.src.ip` | licznik `invalid_users` (nie jest nieudanym logowaniem) |
+| `auth.failure`, `auth.invalid_user`, `auth.attempt` z `event.user.name` z `detection.confirm.accounts` | `event.src.ip` | flaga `decoy_attempt` |
+
+Raporty v2 biorą adres z `event.src.ip`; `network_context.endpoints[0]` jest zapasem dla raportów v1.
 
 ### 7.2 Dlaczego tylko pierwszy adres
 
@@ -1654,22 +1692,25 @@ Dla każdego IP trzymane są liczniki łączne oraz okna przesuwne (znaczniki cz
     private static final int PORT_SCAN_THRESHOLD = 3;       // distinct local ports from one IP = scan
 ```
 
-*`server/src/main/java/pl/honeypot/server/store/ReportStore.java`, linie 326–329*
+*`server/src/main/java/pl/honeypot/server/store/ReportStore.java`, `threatOf`*
 
 ```java
-                String threat = s.confirmed ? "confirmed"
-                        : fails >= FAIL_THRESHOLD ? "brute_force"
-                        : ports >= PORT_SCAN_THRESHOLD ? "fast_enum"
-                        : (s.authFailures > 0 || s.breadcrumbRead) ? "suspicious" : "contact";
+        return s.confirmed ? "confirmed"
+                : (s.decoyAttempt || s.breadcrumbRead) ? "bait"
+                : fails >= FAIL_THRESHOLD ? "brute_force"
+                : (distinctPorts(s, now) >= PORT_SCAN_THRESHOLD || s.scanned) ? "fast_enum"
+                : (s.authFailures > 0 || s.probed || s.invalidUsers > 0) ? "suspicious"
+                : "contact";
 ```
 
-| Poziom | Warunek | Znaczenie |
-|---|---|---|
-| `confirmed` | udane logowanie na konto z `detection.confirm.accounts` | pewny atak: hasło tego konta nie jest do zgadnięcia, leży tylko w okruszku |
-| `brute_force` | ≥ 5 nieudanych logowań z jednego IP w 10 min | zgadywanie haseł |
-| `fast_enum` | ≥ 3 różne porty lokalne z jednego IP w 60 s | skan portów (zwykły klient Windows dotyka tylko 445/139) |
-| `suspicious` | ≥ 1 nieudane logowanie lub odczyt okruszka | warte uwagi |
-| `contact` | samo połączenie | szum lub wczesny kontakt |
+| Poziom | Dashboard | Warunek | Znaczenie | Mail |
+|---|---|---|---|---|
+| `confirmed` | POTWIERDZONY | udane logowanie na konto z `detection.confirm.accounts` | pewny atak: hasło tego konta nie jest do zgadnięcia, leży tylko w okruszku | tak |
+| `bait` | PRZYNĘTA | próba logowania na konto-przynętę (także z błędnym hasłem) albo odczyt okruszka | atakujący przeszukał udziały i znalazł przynętę | tak |
+| `brute_force` | BRUTE FORCE | ≥ 5 nieudanych logowań (w tym `auth.denied`) z jednego IP w 10 min | zgadywanie haseł | tak |
+| `fast_enum` | SKANER | ≥ 3 różne porty lokalne z jednego IP w 60 s albo `net.scan` od agenta | skan portów (zwykły klient Windows dotyka tylko 445/139) | tak |
+| `suspicious` | PODEJRZANY | ≥ 1 nieudane logowanie, sonda usługi (`net.probe`) albo nieistniejące konto | warte uwagi | nie |
+| `contact` | kontakt | samo połączenie | szum lub wczesny kontakt | nie |
 
 Lista jest sortowana malejąco po poziomie, przy remisie po `last_seen`. Okna liczone są względem chwili zapytania, więc stary atak sprzed godziny ma `failures_10m = 0`
 i spada do `suspicious`/`contact`, mimo że `auth_failures` (licznik łączny) pozostaje wysoki.
@@ -1682,7 +1723,8 @@ i spada do `suspicious`/`contact`, mimo że `auth_failures` (licznik łączny) p
     "first_seen": "2026-11-11T12:51:25Z", "last_seen": "2026-11-11T12:51:25Z",
     "connections": 0, "auth_failures": 5, "events": 5,
     "failures_10m": 5, "events_1m": 5, "distinct_ports": 1,
-    "confirmed": false, "breadcrumb_read": false, "last_operation": "append" }
+    "confirmed": false, "breadcrumb_read": false, "last_operation": "append",
+    "probed": false, "invalid_users": 0, "decoy_attempt": false }
 ]
 ```
 
@@ -1690,8 +1732,26 @@ i spada do `suspicious`/`contact`, mimo że `auth_failures` (licznik łączny) p
 
 - `breadcrumb_read` działa tylko przy włączonym `full_audit` w Sambie (agent nie widzi odczytów plików).
 - Zdarzenia `share` (zapis pliku) nie niosą adresu klienta, więc aktywności na plikach nie da się przypisać do IP w tej tabeli. Powiązanie jest tylko w `evidence[]` raportu zmiany pliku.
-- Dashboard nie wyświetla `/api/attackers` (rozdz. 8); endpoint jest dostępny przez `curl`.
+- Sonda SSH zapisana jako `kex_exchange_identification:` (Alma 10) nie ma adresu w tej samej linii, więc nie trafia do tabeli atakujących.
 - Korelacja „odczyt okruszka → logowanie `backup_srv`" nie jest łączona w jedną historię: oba sygnały są niezależnymi flagami (`breadcrumb_read`, `confirmed`).
+
+### 7.6 Alarmy e-mail
+
+Pakiet `pl.honeypot.server.alert`; włączane kluczem `alert.enabled=true` (rozdz. 6.1). Projekt: `docs/superpowers/specs/2026-11-26-alerty-email-design.md`,
+konfiguracja krok po kroku: `docs/WDROZENIE-OD-ZERA.md`, rozdz. 10a.
+
+- **Kiedy.** `ReportStore` po każdym przyjętym raporcie liczy poziom adresów, których raport dotyczył. Gdy poziom jest w `ALERT_LEVELS`
+  (`fast_enum`, `brute_force`, `bait`, `confirmed`) i jest wyższy niż ostatnio zgłoszony dla tego IP, woła `AlertSink.escalated(AlertNotice)`.
+  Ten sam IP na tym samym lub niższym poziomie nie dostaje kolejnego maila; poziom „zgłoszony" jest pamiętany bez limitu czasu.
+- **Start.** Raporty wczytywane z `events.jsonl` ustawiają poziom „zgłoszony", ale maili nie wysyłają, więc restart nie powtarza alarmów.
+- **Wysyłka.** `AlertService`: kolejka 100 pozycji i jeden wątek `alert-mailer`; `escalated` nigdy nie czeka (pełna kolejka = alarm pominięty
+  i policzony). Limit `alert.max_per_hour` w oknie przesuwnym 1 h; pominięte alarmy są wymienione w następnym wysłanym mailu („pominięto N").
+  Błąd SMTP: ponowienia po 30 s, 2 min i 10 min, potem wpis `alert: mail not sent ...` w logu usługi.
+- **Treść.** Temat `[honeypot <agent_id>] <POZIOM> <IP>`; treść: powód, liczniki z `/api/attackers`, do 10 ostatnich zdarzeń z tego IP
+  (czas, typ, serwis, konto, port źródłowy). Bez haseł (`event.credential`) i bez surowej treści logów.
+- **SMTP.** `SmtpMailer` (Jakarta Mail, implementacja Eclipse Angus), limity czasu 10 s; STARTTLS i logowanie tylko gdy ustawione.
+- **Test.** `java -jar collector.jar --test-alert <plik.properties>` wysyła jeden mail „[honeypot] test alarmu" na podstawie samych kluczy `alert.*`
+  (bez keystore); kod wyjścia 0 = wysłano.
 
 ---
 
@@ -1761,11 +1821,17 @@ async function refresh() {
 
 ### 8.2 Widoki
 
-- **Pasek stanu:** liczba agentów online/wszystkich, liczba zdarzeń, liczba źródeł, sześć najczęstszych klasyfikacji.
+- **Pasek stanu:** liczba agentów online/wszystkich, liczba zdarzeń, liczba źródeł, sześć najczęstszych rodzajów zdarzeń z `by_event_kind`
+  (np. „SSH · nieudane logowanie", bez heartbeat); starszy serwer bez tego pola: sześć najczęstszych klasyfikacji.
 - **Agenci:** tabela stanu (`● online` / `○ offline`), czas ostatniego raportu, liczba raportów, ostatnia operacja.
+- **Atakujący:** dane z `/api/attackers`: adres IP, ocena jako znaczek (POTWIERDZONY, PRZYNĘTA, BRUTE FORCE: czerwone; SKANER, PODEJRZANY: żółte),
+  nieudane logowania (łącznie i w 10 min), sygnały (skan, sonda usługi, nieistniejące konta, próba na konto-przynętę, odczyt przynęty), pierwsze
+  i ostatnie wystąpienie. Adresy z samym połączeniem są tylko zliczone. Kliknięcie IP wpisuje go do wyszukiwarki dziennika.
 - **Dziennik zdarzeń:** tabela z filtrami (źródło, agent, limit, szukanie tekstu, „ukryj szum (unknown)" domyślnie włączone, „ukryj heartbeat"), grupowana po dniach.
   Wiersze z błędem lub `complete=false` są widoczne zawsze, nawet przy filtrach (luki w obserwacji nie mogą zniknąć).
 - **Szuflada szczegółów:** kliknięcie wiersza otwiera pełny surowy JSON raportu z kolorowaniem składni i przyciskiem „kopiuj".
+- **Kolumna „klasyfikacja"** pokazuje etykietę z `event.type` i `event.service` (np. „SMB · odmowa dostępu", „SSH · sonda usługi (np. nmap -sV)");
+  raporty v1 bez bloku `event` pokazują `analysis.classification`. W szczegółach jest `konto @ IP:port` i znaczek oceny atakującego przy IP.
 
 ### 8.3 Kolorowanie
 
@@ -1783,7 +1849,9 @@ function classTone(c) {
 }
 ```
 
-Kolor zależy od **klasyfikacji**. Luki obserwacji (`observation_gap`) są *operacją*, a ich klasyfikacja to `unknown`, więc same nie są podświetlone jako ostrzeżenie
+Raporty z blokiem `event` są kolorowane według `event.type` (`eventTone` w `app.js`): czerwone `auth.failure`, `auth.attempt`, `auth.denied`,
+`net.scan`, `net.probe`, `file.change`; żółte `auth.success`, `auth.invalid_user`, `net.connection`, `samba.audit` i zdarzenia systemowe o lukach.
+Funkcja `classTone` poniżej obsługuje raporty v1. Kolor zależy wtedy od **klasyfikacji**. Luki obserwacji (`observation_gap`) są *operacją*, a ich klasyfikacja to `unknown`, więc same nie są podświetlone jako ostrzeżenie
 (widać je dzięki regule „wiersze z błędem zawsze widoczne").
 
 ### 8.4 Bezpieczeństwo dashboardu
