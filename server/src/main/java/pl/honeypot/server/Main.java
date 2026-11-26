@@ -5,12 +5,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.Javalin;
 import io.javalin.http.staticfiles.Location;
 import io.javalin.json.JavalinJackson;
+import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.util.Properties;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
+import pl.honeypot.server.alert.AlertConfig;
+import pl.honeypot.server.alert.AlertService;
+import pl.honeypot.server.alert.SmtpMailer;
 import pl.honeypot.server.api.AgentsHandler;
 import pl.honeypot.server.api.AttackersHandler;
 import pl.honeypot.server.api.EventsQueryHandler;
@@ -23,6 +29,9 @@ import pl.honeypot.server.store.ReportStore;
 public final class Main {
 
     public static void main(String[] args) throws Exception {
+        if (args.length > 0 && args[0].equals("--test-alert")) {
+            System.exit(testAlert(Path.of(args.length > 1 ? args[1] : "config/server.properties")));
+        }
         Path configFile = Path.of(args.length > 0 ? args[0] : "config/server.properties");
         ServerConfig cfg = ServerConfig.load(configFile);
 
@@ -36,6 +45,13 @@ public final class Main {
         ReportStore reports = new ReportStore(
                 new JsonlLog(cfg.dataDir().resolve("events.jsonl"), mapper, "event_id"),
                 cfg.confirmAccounts(), cfg.breadcrumbMarker());
+        if (cfg.alert().enabled()) {
+            AlertService alerts = new AlertService(cfg.alert(), new SmtpMailer(cfg.alert()), Clock.systemUTC());
+            alerts.start();
+            reports.setAlertSink(alerts);
+            System.out.println("alert: mail via " + cfg.alert().host() + ":" + cfg.alert().port()
+                    + " to " + cfg.alert().to().size() + " recipient(s)");
+        }
 
         // An empty dashboard.dir= means "don't serve": Path.of("") is the working directory and would be served.
         boolean serveDashboard = !cfg.dashboardDir().toString().isEmpty() && Files.isDirectory(cfg.dashboardDir());
@@ -83,5 +99,27 @@ public final class Main {
         app.get("/api/attackers", new AttackersHandler(reports));
 
         app.start();
+    }
+
+    // Sends one test mail with the alert.* settings only (no keystore needed). 0 = sent, 1 = disabled or failed.
+    private static int testAlert(Path configFile) {
+        try {
+            Properties p = new Properties();
+            try (Reader r = Files.newBufferedReader(configFile)) {
+                p.load(r);
+            }
+            AlertConfig cfg = AlertConfig.from(p);
+            if (!cfg.enabled()) {
+                System.err.println("alert.enabled is not true in " + configFile);
+                return 1;
+            }
+            new SmtpMailer(cfg).send("[honeypot] test alarmu",
+                    "Mail testowy z serwera honeypota. Jeśli go widzisz, alarmy e-mail działają.\n");
+            System.out.println("sent to " + String.join(", ", cfg.to()) + " via " + cfg.host() + ":" + cfg.port());
+            return 0;
+        } catch (Exception e) {
+            System.err.println("test mail failed: " + e);
+            return 1;
+        }
     }
 }
