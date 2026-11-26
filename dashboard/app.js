@@ -15,6 +15,7 @@ let lastSignature = "";
 let lastOk = "";
 let currentJson = "";
 let drawerOpener = null;
+let threatByIp = new Map();   // ip -> threat from /api/attackers, for badges in the event log
 
 function esc(s) {
   return String(s == null ? "" : s)
@@ -69,6 +70,86 @@ function classTone(c) {
   return "info";
 }
 
+// Human names for schema v2 event.type; unknown types are shown as-is.
+const EVENT_LABELS = {
+  "auth.failure": "nieudane logowanie",
+  "auth.attempt": "próba hasła",
+  "auth.success": "udane logowanie",
+  "auth.invalid_user": "nieistniejące konto",
+  "auth.denied": "odmowa dostępu",
+  "net.scan": "skan portów",
+  "net.probe": "sonda usługi (np. nmap -sV)",
+  "net.connection": "połączenie TCP",
+  "file.change": "zmiana pliku",
+  "samba.audit": "audyt Samby",
+  "system.heartbeat": "heartbeat",
+  "system.observation_gap": "luka w obserwacji",
+  "system.source_unavailable": "źródło niedostępne",
+  "log.entry": "wpis logu",
+  "system.unknown": "nieznane",
+};
+const TYPE_DANGER = ["auth.failure", "auth.attempt", "auth.denied", "net.scan", "net.probe", "file.change"];
+const TYPE_WARN = ["auth.success", "auth.invalid_user", "net.connection", "samba.audit",
+  "system.observation_gap", "system.source_unavailable"];
+
+// "SSH · nieudane logowanie" from type + service; null service gives just the name.
+function kindLabel(type, service) {
+  const name = EVENT_LABELS[type] || type;
+  return service ? service.toUpperCase() + " · " + name : name;
+}
+
+// Label for one report: the v2 event block when present, else the v1 classification.
+function eventLabel(r) {
+  const ev = r.event;
+  if (ev && ev.type) return kindLabel(ev.type, ev.service);
+  return r.analysis ? r.analysis.classification : null;
+}
+
+function eventTone(r) {
+  const t = r.event && r.event.type;
+  if (!t) return classTone(r.analysis ? r.analysis.classification : null);
+  if (TYPE_DANGER.includes(t)) return "danger";
+  if (TYPE_WARN.includes(t)) return "warn";
+  return "info";
+}
+
+// Threat levels from /api/attackers, most serious first.
+const THREATS = {
+  confirmed: { label: "POTWIERDZONY", tone: "danger", hint: "zalogował się na konto-wabik" },
+  brute_force: { label: "BRUTE FORCE", tone: "danger", hint: "5+ nieudanych logowań w 10 min" },
+  fast_enum: { label: "SKANER", tone: "warn", hint: "skan portów albo 3+ porty w minutę" },
+  suspicious: { label: "PODEJRZANY", tone: "warn", hint: "nieudane logowanie, sonda usługi, nieistniejące konto albo przynęta" },
+  contact: { label: "kontakt", tone: "info", hint: "samo połączenie" },
+};
+
+function threatBadge(threat) {
+  const t = THREATS[threat];
+  if (!t) return "";
+  return `<span class="badge badge-${t.tone}" title="${esc(t.hint)}">${esc(t.label)}</span>`;
+}
+
+// Clickable IP (filters the event log to it) plus the attacker badge when that IP is graded above "contact".
+function ipTag(ip, port, withBadge = true) {
+  if (!ip) return "";
+  const threat = withBadge ? threatByIp.get(ip) : null;
+  const badge = threat && threat !== "contact" ? " " + threatBadge(threat) : "";
+  return `<button type="button" class="ip" data-ip="${esc(ip)}" title="pokaż zdarzenia z tego adresu">`
+    + `${esc(ip)}${port != null ? ":" + esc(port) : ""}</button>${badge}`;
+}
+
+// "bob @ 203.0.113.9:4242" for events with a parsed source, plus net.scan details.
+function eventWho(r) {
+  const ev = r.event;
+  if (!ev) return "";
+  const bits = [];
+  const src = ev.src && ev.src.ip ? ipTag(ev.src.ip, ev.src.port) : "";
+  const user = ev.user && ev.user.name ? esc(ev.user.name) : "";
+  if (user || src) bits.push(user && src ? `${user} @ ${src}` : user || src);
+  const d = ev.detail;
+  if (d && d.ports) bits.push(`${esc(d.ports)} portów${d.scan ? " " + esc(d.scan) : ""}`);
+  return bits.length ? ` <span class="sub">${bits.join(", ")}</span>` : "";
+}
+
 // A short, human summary of a report, tailored to its source/operation.
 function summarize(r) {
   const path = r.path != null && r.path !== "" ? esc(r.path)
@@ -77,7 +158,7 @@ function summarize(r) {
   if (r.source === "network" && r.connection) {
     const c = r.connection;
     const peer = c.peer || {};
-    let s = `<b>${esc(c.local_ip)}:${esc(c.local_port)}</b> ← ${esc(peer.ip)}:${esc(c.peer_port)}`;
+    let s = `<b>${esc(c.local_ip)}:${esc(c.local_port)}</b> ← ${peer.ip ? ipTag(peer.ip, c.peer_port) : "?"}`;
     if (peer.mac) s += ` <span class="sub">MAC ${esc(peer.mac)}</span>`;
     else if (peer.mac_status) s += ` <span class="sub">(${esc(peer.mac_status)})</span>`;
     return s;
@@ -107,7 +188,7 @@ function summarize(r) {
     if (eps) bits.push(eps + " IP");
     if (bits.length) s += ` <span class="sub">(${bits.join(", ")})</span>`;
   }
-  return s;
+  return s + eventWho(r);
 }
 
 function stateCell(r) {
@@ -119,7 +200,9 @@ function stateCell(r) {
 // Text used by the search box: the fields an analyst usually looks for.
 function haystack(r) {
   const parts = [r.agent_id, r.source, r.operation, r.path,
-    r.analysis && r.analysis.classification,
+    r.analysis && r.analysis.classification, eventLabel(r),
+    r.event && r.event.type, r.event && r.event.user && r.event.user.name,
+    r.event && r.event.src && r.event.src.ip,
     typeof r.content === "string" ? r.content.slice(0, 600) : ""];
   const peer = r.connection && r.connection.peer;
   if (peer) parts.push(peer.ip, peer.mac);
@@ -133,6 +216,18 @@ function renderStats(s) {
   el("stat-agents-total").textContent = s.total_agents;
   el("stat-events").textContent = s.total_events;
   el("stat-sources").textContent = s.by_source ? Object.keys(s.by_source).length : 0;
+  // Prefer "type/service" counts (server >= 0.3.1); older servers only send by_classification.
+  const kinds = Object.entries(s.by_event_kind || {}).filter(([k]) => k !== "system.heartbeat");
+  if (kinds.length) {
+    el("stat-classes").innerHTML = kinds.sort((a, b) => b[1] - a[1]).slice(0, 6).map(([key, n]) => {
+      const slash = key.indexOf("/");
+      const type = slash < 0 ? key : key.slice(0, slash);
+      const service = slash < 0 ? null : key.slice(slash + 1);
+      const tone = eventTone({ event: { type } });
+      return `<span class="c-${tone}">${esc(kindLabel(type, service))} ${esc(n)}</span>`;
+    }).join("");
+    return;
+  }
   const classes = Object.entries(s.by_classification || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
   el("stat-classes").innerHTML = classes
     .map(([name, n]) => `<span class="c-${classTone(name)}">${esc(name)} ${esc(n)}</span>`).join("");
@@ -170,6 +265,45 @@ function renderAgents(agents) {
   }
 }
 
+function renderAttackers(list) {
+  threatByIp = new Map(list.map((a) => [a.ip, a.threat]));
+  const body = el("attackers");
+  const shown = list.filter((a) => a.threat !== "contact");
+  const contacts = list.length - shown.length;
+  if (!shown.length) {
+    body.innerHTML = `<tr><td colspan='6' class='empty'>Brak podejrzanych adresów`
+      + (contacts ? ` (${contacts} z samym połączeniem).` : ".") + "</td></tr>";
+    return;
+  }
+  const rows = shown.map((a) => {
+    const signals = [];
+    if (a.confirmed) signals.push("logowanie na wabik");
+    if (a.breadcrumb_read) signals.push("odczyt przynęty");
+    if (a.distinct_ports >= 3) signals.push(`${esc(a.distinct_ports)} porty/min`);
+    if (a.threat === "fast_enum" && a.distinct_ports < 3) signals.push("skan portów");
+    if (a.probed) signals.push("sonda usługi");
+    if (a.invalid_users) signals.push(`${esc(a.invalid_users)}× nieistniejące konto`);
+    const tone = (THREATS[a.threat] || {}).tone || "info";
+    return `<tr class="row-${tone}">
+      <td>${ipTag(a.ip, null, false)}${a.mac ? ` <span class="sub">${esc(a.mac)}</span>` : ""}</td>
+      <td>${threatBadge(a.threat)}</td>
+      <td>${esc(a.auth_failures)} <span class="sub">(${esc(a.failures_10m)} w 10 min)</span></td>
+      <td>${signals.join(", ") || "<span class='sub'>—</span>"}</td>
+      <td>${relTime(a.first_seen)}</td>
+      <td>${relTime(a.last_seen)} <span class="sub">${fmtTime(a.last_seen)}</span></td>
+    </tr>`;
+  });
+  if (contacts) rows.push(`<tr><td colspan='6' class='empty'>+ ${contacts} adresów z samym połączeniem</td></tr>`);
+  body.innerHTML = rows.join("");
+}
+
+// Puts an IP into the search box, so the event log shows only that address.
+function filterByIp(ip) {
+  el("filter-text").value = ip;
+  force();
+  el("filter-text").scrollIntoView({ block: "nearest" });
+}
+
 function renderEvents(events, fetched) {
   const total = fetched.length;
   el("shown-count").textContent = events.length < total
@@ -177,7 +311,8 @@ function renderEvents(events, fetched) {
     : `${total} zdarzeń`;
 
   // Same rows as last time: leave the table alone so selection and focus survive.
-  const signature = events.map((r) => r.report_id).join(",");
+  const signature = events.map((r) => r.report_id).join(",")
+    + "|" + [...threatByIp].map(([ip, t]) => ip + "=" + t).join(",");   // badges change with the grading
   if (signature === lastSignature) return;
   lastSignature = signature;
 
@@ -203,8 +338,8 @@ function renderEvents(events, fetched) {
       day = d;
       rows.push(`<tr class="day"><td colspan="7">${esc(d)}</td></tr>`);
     }
-    const cls = r.analysis ? r.analysis.classification : null;
-    const tone = classTone(cls);
+    const cls = eventLabel(r);
+    const tone = eventTone(r);
     const mark = tone === "danger" ? "! " : tone === "warn" ? "~ " : "";
     rows.push(`<tr class="clickable row-${tone}" tabindex="0" data-id="${esc(r.report_id)}">
       <td class="time" title="${esc(when)}">${clock(when)}</td>
@@ -297,14 +432,16 @@ async function refresh() {
   query.set("limit", fetchLimit);
 
   try {
-    const [stats, agents, events] = await Promise.all([
+    const [stats, agents, events, attackers] = await Promise.all([
       api("/api/stats"),
       api("/api/agents"),
       api("/api/events?" + query.toString()),
+      api("/api/attackers").catch(() => []),   // older server without the endpoint: no panel data
     ]);
     if (!Array.isArray(agents) || !Array.isArray(events)) throw new Error("niepoprawna odpowiedź serwera");
     renderStats(stats);
     renderAgents(agents);
+    renderAttackers(Array.isArray(attackers) ? attackers : []);
     let shown = events;
     if (filtering) {
       shown = events.filter((r) => {
@@ -342,11 +479,18 @@ let typing = null;
 el("filter-text").addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(force, 250); });
 el("auto").addEventListener("change", scheduleAuto);
 
+el("attackers").addEventListener("click", (e) => {
+  const b = e.target.closest("button.ip");
+  if (b) filterByIp(b.dataset.ip);
+});
 el("events").addEventListener("click", (e) => {
+  const b = e.target.closest("button.ip");
+  if (b) { filterByIp(b.dataset.ip); return; }   // clicking an IP filters instead of opening the report
   const tr = e.target.closest("tr.clickable");
   if (tr) openDrawer(tr.dataset.id);
 });
 el("events").addEventListener("keydown", (e) => {
+  if (e.target.closest("button.ip")) return;   // Enter on an IP button triggers its click
   const tr = e.target.closest("tr.clickable");
   if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openDrawer(tr.dataset.id); }
 });

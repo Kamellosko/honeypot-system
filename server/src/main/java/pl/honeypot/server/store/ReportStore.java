@@ -71,6 +71,8 @@ public final class ReportStore {
         final Map<Integer, Instant> portTimes = new HashMap<>(); // distinct local ports, pruned to ENUM_WINDOW
         boolean confirmed;        // successful login to a decoy account
         boolean breadcrumbRead;   // read a file containing the breadcrumb marker
+        boolean probed;           // service probe without a valid banner (net.probe, e.g. nmap -sV)
+        long invalidUsers;        // logins to accounts that do not exist (auth.invalid_user)
     }
 
     // Snapshot of an agent for GET /api/agents.
@@ -94,6 +96,8 @@ public final class ReportStore {
             @JsonProperty("by_classification") Map<String, Long> byClassification,
             @JsonProperty("by_operation") Map<String, Long> byOperation,
             @JsonProperty("by_event_type") Map<String, Long> byEventType,
+            // "type/service" (e.g. "auth.failure/ssh"), or just the type when the event has no service.
+            @JsonProperty("by_event_kind") Map<String, Long> byEventKind,
             @JsonProperty("unknown_event_types") long unknownEventTypes) {
     }
 
@@ -112,7 +116,9 @@ public final class ReportStore {
             @JsonProperty("distinct_ports") int distinctPorts,
             @JsonProperty("confirmed") boolean confirmed,
             @JsonProperty("breadcrumb_read") boolean breadcrumbRead,
-            @JsonProperty("last_operation") String lastOperation) {
+            @JsonProperty("last_operation") String lastOperation,
+            @JsonProperty("probed") boolean probed,
+            @JsonProperty("invalid_users") long invalidUsers) {
     }
 
     // Successful SSH login line; a login to one of confirmAccounts means the attacker used the breadcrumb password.
@@ -122,7 +128,8 @@ public final class ReportStore {
     // Event types the agent knows today (schema v2 catalog). Others are still stored, just counted separately.
     public static final Set<String> KNOWN_EVENT_TYPES = Set.of("file.change", "net.connection", "auth.failure",
             "auth.success", "samba.audit", "system.heartbeat", "system.source_unavailable",
-            "system.observation_gap", "log.entry", "system.unknown", "auth.attempt", "net.scan");
+            "system.observation_gap", "log.entry", "system.unknown", "auth.attempt", "net.scan",
+            "auth.invalid_user", "auth.denied", "net.probe");
 
     private final JsonlLog log;
     private final Object lock = new Object();
@@ -135,6 +142,7 @@ public final class ReportStore {
     private final Map<String, Long> byClassification = new ConcurrentHashMap<>();
     private final Map<String, Long> byOperation = new ConcurrentHashMap<>();
     private final Map<String, Long> byEventType = new ConcurrentHashMap<>();
+    private final Map<String, Long> byEventKind = new ConcurrentHashMap<>();
     private volatile long unknownEventTypes;
     private final Map<String, AttackerState> attackers = new ConcurrentHashMap<>();
     private volatile long totalEvents;
@@ -195,6 +203,9 @@ public final class ReportStore {
         String eventType = event != null ? text(event, "type") : null;
         if (eventType != null) {
             bump(byEventType, capKey(byEventType, eventType));
+            String service = text(event, "service");
+            String kind = service != null ? eventType + "/" + service : eventType;
+            bump(byEventKind, capKey(byEventKind, kind));
             if (!KNOWN_EVENT_TYPES.contains(eventType)) {
                 unknownEventTypes++;
             }
@@ -223,11 +234,21 @@ public final class ReportStore {
                 recordAttacker(text(peer, "ip"), text(peer, "mac"), at, false, port, operation);
             }
         }
-        // Attacker from a failed login (SSH and SMB both land here as authentication_failure).
+        // Probe or a guess at a non-existent account: suspicious, but not a failed password (that line comes separately).
+        if ("net.probe".equals(eventType) || "auth.invalid_user".equals(eventType)) {
+            JsonNode src = event.get("src");
+            String ip = src != null ? text(src, "ip") : null;
+            if (ip != null) {
+                flagSuspect(ip, at, operation, "net.probe".equals(eventType));
+            }
+        }
+
+        // Attacker from a failed login (SSH and SMB both land here as authentication_failure);
+        // a Samba access denial (auth.denied) counts the same.
         // Only the first address counts: the agent puts the real client ("remote host [..]" in Samba,
         // "from IP" in sshd) first, while later ones are this server ("local host [..]") or made-up
         // addresses the attacker typed into the user name.
-        if ("authentication_failure".equals(classification)) {
+        if ("authentication_failure".equals(classification) || "auth.denied".equals(eventType)) {
             // v2 reports carry the parsed source address; v1 falls back to the text-derived endpoint.
             JsonNode src = event != null ? event.get("src") : null;
             String ip = src != null ? text(src, "ip") : null;
@@ -341,6 +362,26 @@ public final class ReportStore {
         s.scanned = true;
     }
 
+    // Flags an IP that probed a service or tried a non-existent account. Caller holds lock.
+    private void flagSuspect(String ip, Instant at, String op, boolean probe) {
+        AttackerState s = attacker(ip, at);
+        if (s == null) {
+            return;
+        }
+        if (s.lastSeen == null || !at.isBefore(s.lastSeen)) {
+            s.lastSeen = at;
+            s.lastOperation = op;
+        }
+        s.events++;
+        s.eventTimes.addLast(at);
+        pruneOlderThan(s.eventTimes, at.minus(ENUM_WINDOW));
+        if (probe) {
+            s.probed = true;
+        } else {
+            s.invalidUsers++;
+        }
+    }
+
     // Flags an IP from content signals (confirmed login, breadcrumb read). Caller holds lock.
     private void markAttacker(String ip, Instant at, boolean confirmed, boolean breadcrumb) {
         AttackerState s = attacker(ip, at);
@@ -371,10 +412,11 @@ public final class ReportStore {
                 String threat = s.confirmed ? "confirmed"
                         : fails >= FAIL_THRESHOLD ? "brute_force"
                         : (ports >= PORT_SCAN_THRESHOLD || s.scanned) ? "fast_enum"
-                        : (s.authFailures > 0 || s.breadcrumbRead) ? "suspicious" : "contact";
+                        : (s.authFailures > 0 || s.breadcrumbRead || s.probed || s.invalidUsers > 0) ? "suspicious"
+                        : "contact";
                 out.add(new AttackerView(s.ip, s.mac, threat, iso(s.firstSeen), iso(s.lastSeen),
                         s.connections, s.authFailures, s.events, fails, evs, ports,
-                        s.confirmed, s.breadcrumbRead, s.lastOperation));
+                        s.confirmed, s.breadcrumbRead, s.lastOperation, s.probed, s.invalidUsers));
             }
         }
         out.sort((x, y) -> {
@@ -470,6 +512,7 @@ public final class ReportStore {
                 new TreeMap<>(byClassification),
                 new TreeMap<>(byOperation),
                 new TreeMap<>(byEventType),
+                new TreeMap<>(byEventKind),
                 unknownEventTypes);
     }
 

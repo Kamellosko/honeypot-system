@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Raport agenta honeypota, schema_version 2",
-  "description": "Koperta raportu z blokiem event. Pola zależne od typu (metadata, connection, content_changes, evidence...) są dozwolone, ale tu nie opisane. event.type spoza katalogu jest dozwolony; katalog v1: file.change, net.connection, auth.failure, auth.success, samba.audit, system.heartbeat, system.source_unavailable, system.observation_gap, log.entry, system.unknown; dodane w 0.3.0: auth.attempt (event.credential), net.scan (event.detail).",
+  "description": "Koperta raportu z blokiem event. Pola zależne od typu (metadata, connection, content_changes, evidence...) są dozwolone, ale tu nie opisane. event.type spoza katalogu jest dozwolony; katalog v1: file.change, net.connection, auth.failure, auth.success, samba.audit, system.heartbeat, system.source_unavailable, system.observation_gap, log.entry, system.unknown; dodane w 0.3.0: auth.attempt (event.credential), net.scan (event.detail); dodane później: auth.invalid_user (ssh, nieistniejące konto), auth.denied (smb, NT_STATUS_ACCESS_DENIED), net.probe (ssh, połączenie bez banera, np. nmap -sV).",
   "type": "object",
   "required": ["schema_version", "agent_version", "report_id", "agent_id", "observed_at", "source", "operation", "analysis", "event"],
   "properties": {

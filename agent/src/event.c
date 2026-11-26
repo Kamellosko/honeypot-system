@@ -21,6 +21,22 @@ static int is_success(const unsigned char *c, size_t n) {
          has(c, n, "Accepted publickey");
 }
 
+/* Samba odmowila dostepu (np. konto bez prawa do udzialu, gosc odrzucony); linie full_audit maja wlasny typ. */
+static int is_denied(const unsigned char *c, size_t n) {
+  return has(c, n, "NT_STATUS_ACCESS_DENIED") && !has(c, n, "smbd_audit");
+}
+
+/* sshd: "Invalid user NAME from IP port N" (sama proba nieistniejacego konta, bez hasla albo przed nim). */
+static int is_invalid_user(const unsigned char *c, size_t n) {
+  return has(c, n, "Invalid user ") && has(c, n, " from ");
+}
+
+/* sshd: polaczenie bez poprawnego banera SSH, typowy slad skanera wersji (nmap -sV) albo sondy portu. */
+static int is_probe(const unsigned char *c, size_t n) {
+  return has(c, n, "Did not receive identification string from") ||
+         has(c, n, "banner exchange: Connection from") || has(c, n, "kex_exchange_identification:");
+}
+
 static void copy_user(struct hp_event *e, const unsigned char *s, size_t n);
 
 /* Ostry dekoder base64 (alfabet standardowy, dlugosc % 4 == 0, '=' tylko na koncu); pusty napis to pusty wynik. */
@@ -109,6 +125,9 @@ const char *hp_classify(const char *operation, const unsigned char *content, siz
   if (first_line(content, size, is_pam, &pam_len)) return "authentication_attempt";
   if (is_failure(content, size)) return "authentication_failure";
   if (is_success(content, size)) return "authentication_success";
+  if (is_denied(content, size)) return "access_denied";
+  if (is_invalid_user(content, size)) return "invalid_user";
+  if (is_probe(content, size)) return "service_probe";
   if (has(content, size, "smbd_audit")) return "samba_audit";
   if (operation && !strcmp(operation, "heartbeat")) return "heartbeat";
   return "unknown";
@@ -182,6 +201,43 @@ static void parse_smb_audit(struct hp_event *e, const unsigned char *l, size_t n
   if (end) copy_user(e, p, (size_t)(end - p));
 }
 
+/* Ostatnie " from " w linii sshd: tam sshd dopisuje adres klienta, wiec nazwa uzytkownika podana przez
+   atakujacego (ktora moze zawierac " from ") nie podmieni adresu. Zwraca wskaznik na " from " albo NULL. */
+static const unsigned char *last_from(const unsigned char *l, size_t n) {
+  const unsigned char *found = NULL, *p = l;
+  while ((p = memmem(p, (size_t)(l + n - p), " from ", 6))) { found = p; p += 6; }
+  return found;
+}
+
+/* "... from IP port N...": adres i port klienta po ostatnim " from ". */
+static void parse_from(struct hp_event *e, const unsigned char *l, size_t n) {
+  const unsigned char *p = last_from(l, n);
+  if (!p) return;
+  p += 6;
+  const unsigned char *end = p;
+  while (end < l + n && *end != ' ' && *end != ':' && *end != '\r') end++;
+  /* IPv6 zawiera ':', wiec gdy adres sie nie parsuje, bierzemy caly token do spacji. */
+  char host[INET6_ADDRSTRLEN];
+  unsigned char probe[sizeof(struct in6_addr)];
+  for (int pass = 0; pass < 2; pass++) {
+    size_t hl = (size_t)(end - p);
+    if (hl > 0 && hl < sizeof(host)) {
+      memcpy(host, p, hl);
+      host[hl] = 0;
+      if (inet_pton(AF_INET, host, probe) == 1 || inet_pton(AF_INET6, host, probe) == 1) {
+        snprintf(e->src_ip, sizeof(e->src_ip), "%s", host);
+        break;
+      }
+    }
+    while (end < l + n && *end != ' ') end++;
+  }
+  const unsigned char *port = memmem(end, (size_t)(l + n - end), " port ", 6);
+  if (port) {
+    int v = atoi((const char *)port + 6);
+    if (v > 0 && v <= 65535) e->src_port = v;
+  }
+}
+
 static void set(struct hp_event *e, const char *category, const char *type, const char *severity) {
   e->category = category; e->type = type; e->severity = severity;
 }
@@ -202,6 +258,31 @@ void hp_event_from_log(struct hp_event *e, const char *source, const char *opera
     if (line) parse_pam(line, len, e);
     return;
   }
+  if (!strcmp(cls, "invalid_user")) {
+    set(e, "authentication", "auth.invalid_user", "low");
+    e->outcome = "failure";
+    e->service = "ssh";
+    line = first_line(content, size, is_invalid_user, &len);
+    if (line) {
+      const unsigned char *p = memmem(line, len, "Invalid user ", 13) + 13;
+      const unsigned char *from = last_from(line, len);
+      if (from && from >= p) copy_user(e, p, (size_t)(from - p));
+      parse_from(e, line, len);
+    }
+    return;
+  }
+  if (!strcmp(cls, "service_probe")) {
+    set(e, "network", "net.probe", "medium");
+    e->service = "ssh";
+    line = first_line(content, size, is_probe, &len);
+    if (line) parse_from(e, line, len);
+    return;
+  }
+  if (!strcmp(cls, "access_denied")) {
+    set(e, "authentication", "auth.denied", "medium");
+    e->outcome = "failure";
+    line = first_line(content, size, is_denied, &len);
+  } else
   if (!strcmp(cls, "authentication_failure")) {
     set(e, "authentication", "auth.failure", "medium");
     e->outcome = "failure";

@@ -64,6 +64,36 @@ int main(void) {
   LOG(e, "Failed password for root from 2001:db8::1 port 22 ssh2");
   assert(!strcmp(e.src_ip, "2001:db8::1"));
 
+  /* sshd: nieistniejace konto -> auth.invalid_user (nie auth.failure, bo "Failed password" liczy sie osobno) */
+  LOG(e, "Nov 26 10:00:00 honey sshd[9]: Invalid user admin from 203.0.113.9 port 50022");
+  assert(!strcmp(e.type, "auth.invalid_user") && !strcmp(e.service, "ssh") && !strcmp(e.outcome, "failure"));
+  assert(!strcmp(e.user, "admin") && !strcmp(e.src_ip, "203.0.113.9") && e.src_port == 50022);
+  assert(!strcmp(hp_classify("append", (const unsigned char *)"Invalid user a from 1.2.3.4 port 1", 34), "invalid_user"));
+  /* nazwa z " from " i falszywym IP nie podmienia adresu klienta */
+  LOG(e, "Invalid user x from 9.9.9.9 port 1 from 203.0.113.9 port 7");
+  assert(!strcmp(e.src_ip, "203.0.113.9") && e.src_port == 7 && !strcmp(e.user, "x from 9.9.9.9 port 1"));
+  LOG(e, "Invalid user root from 2001:db8::5 port 22");
+  assert(!strcmp(e.src_ip, "2001:db8::5") && e.src_port == 22);
+  /* linia z haslem wygrywa: to nadal auth.failure */
+  LOG(e, "Invalid user bob from 203.0.113.9 port 1\nFailed password for invalid user bob from 203.0.113.9 port 1 ssh2");
+  assert(!strcmp(e.type, "auth.failure"));
+
+  /* sonda banera SSH (nmap -sV) -> net.probe */
+  LOG(e, "sshd[3]: Did not receive identification string from 198.51.100.4 port 61000");
+  assert(!strcmp(e.type, "net.probe") && !strcmp(e.category, "network") && !strcmp(e.service, "ssh"));
+  assert(!strcmp(e.src_ip, "198.51.100.4") && e.src_port == 61000);
+  LOG(e, "sshd[3]: banner exchange: Connection from 198.51.100.4 port 61001: invalid format");
+  assert(!strcmp(e.type, "net.probe") && !strcmp(e.src_ip, "198.51.100.4") && e.src_port == 61001);
+  LOG(e, "sshd[3]: error: kex_exchange_identification: Connection closed by remote host");
+  assert(!strcmp(e.type, "net.probe") && !e.src_ip[0]);
+
+  /* Samba: odmowa dostepu -> auth.denied, serwis smb */
+  LOG(e, "Auth: [SMB2,(null)] user [DOM]\\[guest] at [x] status [NT_STATUS_ACCESS_DENIED] remote host [ipv4:192.0.2.8:49282]");
+  assert(!strcmp(e.type, "auth.denied") && !strcmp(e.service, "smb") && !strcmp(e.user, "guest"));
+  assert(!strcmp(e.src_ip, "192.0.2.8"));
+  LOG(e, "smbd_audit[5]: bob|192.0.2.8|pc|share|open|fail (NT_STATUS_ACCESS_DENIED)|x");
+  assert(!strcmp(e.type, "samba.audit"));
+
   LOG(e, "some unrelated syslog line");
   assert(!strcmp(e.type, "log.entry") && !strcmp(e.severity, "info") && !e.src_ip[0] && e.src_port == -1);
 

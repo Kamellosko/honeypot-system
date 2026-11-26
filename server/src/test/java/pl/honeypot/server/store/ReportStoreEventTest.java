@@ -95,4 +95,48 @@ class ReportStoreEventTest {
         assertEquals(1L, store.stats().byEventType().get("auth.failure"));
         assertTrue(store.stats().unknownEventTypes() == 0);
     }
+
+    @Test
+    void probeMakesAttackerSuspiciousWithoutCountingFailure() throws Exception {
+        store.insert(report(2, "service_probe", null, typedEvent("net.probe", "198.51.100.4")));
+        var a = store.attackers().get(0);
+        assertEquals("198.51.100.4", a.ip());
+        assertEquals("suspicious", a.threat());
+        assertTrue(a.probed());
+        assertEquals(0, a.authFailures());
+        assertEquals(0, a.connections());
+    }
+
+    @Test
+    void invalidUserIsSuspiciousAndCounted() throws Exception {
+        store.insert(report(2, "invalid_user", null, typedEvent("auth.invalid_user", "198.51.100.5")));
+        store.insert(report(2, "invalid_user", null, typedEvent("auth.invalid_user", "198.51.100.5")));
+        var a = store.attackers().get(0);
+        assertEquals("suspicious", a.threat());
+        assertEquals(2, a.invalidUsers());
+        assertEquals(0, a.authFailures());
+    }
+
+    @Test
+    void sambaAccessDeniedCountsAsFailureUpToBruteForce() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            store.insert(report(2, "access_denied", null, typedEvent("auth.denied", "192.0.2.8")));
+        }
+        var a = store.attackers().get(0);
+        assertEquals(5, a.authFailures());
+        assertEquals("brute_force", a.threat());
+    }
+
+    @Test
+    void byEventKindSeparatesSshFromSmb() throws Exception {
+        store.insert(report(2, "authentication_failure", null, authEvent("203.0.113.9")));
+        store.insert(report(2, "authentication_failure", null, authEvent("203.0.113.9").replace("\"ssh\"", "\"smb\"")));
+        store.insert(report(2, "service_probe", null, typedEvent("net.probe", "203.0.113.9")));
+        var kinds = store.stats().byEventKind();
+        assertEquals(1L, kinds.get("auth.failure/ssh"));
+        assertEquals(1L, kinds.get("auth.failure/smb"));
+        assertEquals(1L, kinds.get("net.probe"));   // "service": null -> sam typ
+        assertEquals(2L, store.stats().byEventType().get("auth.failure"));
+        assertEquals(0L, store.stats().unknownEventTypes());
+    }
 }

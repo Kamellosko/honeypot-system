@@ -71,6 +71,8 @@ tee /etc/systemd/system/sys-auditd.service.d/override.conf >/dev/null <<EOF
 [Service]
 ExecStart=
 ExecStart=/usr/local/sbin/sys-auditd --id $AGENT_ID --ip $SERVER_IP --port $SERVER_PORT
+# EL10: filtr RestrictSUIDSGID blokuje openat2 (ENOSYS), a agent nie ma fallbacku na openat.
+RestrictSUIDSGID=no
 EOF
 chmod 600 /etc/systemd/system/sys-auditd.service.d/override.conf
 
