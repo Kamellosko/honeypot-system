@@ -319,9 +319,13 @@ const GROUP_GAP_MS = 10 * 60 * 1000;   // a pause longer than this starts a new 
 
 function groupKey(r) {
   const ev = r.event;
-  if (!ev || !GROUP_TYPES.includes(ev.type) || !ev.src || !ev.src.ip) return null;
+  if (!ev || !GROUP_TYPES.includes(ev.type)) return null;
+  // Samba writes one failed login as several lines; the follow-up ones carry no address in the text, only in the
+  // per-client log file name (log.<ip>), so that path stands in for the source.
+  const from = ev.src && ev.src.ip ? ev.src.ip : (ev.service === "smb" && r.path ? "file:" + r.path : null);
+  if (!from) return null;
   const cred = ev.credential ? (ev.credential.password ?? ev.credential.password_base64 ?? "") : "";
-  return [ev.type, ev.service || "", ev.src.ip, ev.user ? ev.user.name : "", cred].join("\u0001");
+  return [ev.type, ev.service || "", from, ev.user ? ev.user.name : "", cred].join("\u0001");
 }
 
 // events are newest first; returns [{ r: newest report, count, from: oldest time, to: newest time }]
