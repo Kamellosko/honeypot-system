@@ -64,6 +64,17 @@ int main(void) {
   LOG(e, "Failed password for root from 2001:db8::1 port 22 ssh2");
   assert(!strcmp(e.src_ip, "2001:db8::1"));
 
+  /* nazwa uzytkownika wygladajaca jak IP nie podmienia adresu klienta (takze loopback i adres admina) */
+  LOG(e, "Failed password for invalid user 9.9.9.9 from 203.0.113.50 port 5000 ssh2");
+  assert(!strcmp(e.user, "9.9.9.9") && !strcmp(e.src_ip, "203.0.113.50") && e.src_port == 5000);
+  LOG(e, "Failed password for invalid user 127.0.0.1 from 203.0.113.50 port 5001 ssh2");
+  assert(!strcmp(e.src_ip, "203.0.113.50") && e.src_port == 5001);
+  LOG(e, "Failed password for 10.0.0.5 from 203.0.113.50 port 5002 ssh2");
+  assert(!strcmp(e.src_ip, "203.0.113.50") && !strcmp(e.user, "10.0.0.5"));
+  LOG(e, "Failed password for invalid user x from 9.9.9.9 port 1 from 203.0.113.50 port 7 ssh2");
+  assert(!strcmp(e.src_ip, "203.0.113.50") && e.src_port == 7);
+  LOG(e, "Failed password for 192.168.56.1");
+  assert(!e.src_ip[0]);   /* bez " from " nie zgadujemy adresu z nazwy uzytkownika */
   /* sshd: nieistniejace konto -> auth.invalid_user (nie auth.failure, bo "Failed password" liczy sie osobno) */
   LOG(e, "Nov 26 10:00:00 honey sshd[9]: Invalid user admin from 203.0.113.9 port 50022");
   assert(!strcmp(e.type, "auth.invalid_user") && !strcmp(e.service, "ssh") && !strcmp(e.outcome, "failure"));

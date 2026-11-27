@@ -53,35 +53,39 @@ Poziomy oceny (`/api/attackers`), od najwyższego:
 Odczyt pliku-przynęty dziś daje tylko `suspicious`; przechodzi na `bait`. Próba na `backup_srv` jest rozpoznawana
 po nazwie użytkownika w `event.user.name` zdarzeń `auth.failure`, `auth.invalid_user` i `auth.attempt`.
 
-Zasady:
-- Mail przy **wejściu** adresu na poziom z kolumny „tak” lub wyższy niż poprzednio zgłoszony. Ten sam IP na tym samym
-  lub niższym poziomie nie dostaje kolejnego maila.
-- Limit globalny: 60 maili na godzinę (średnio jeden na minutę); nadmiar jest liczony i zgłaszany w następnym wysłanym mailu („pominięto N”).
-- Zdarzenia wczytywane z `events.jsonl` przy starcie nie wysyłają maili, ale ustawiają poziom „już zgłoszony”,
-  żeby restart nie powtarzał alarmów.
+Zasady (zmiana z 2026-11-27: **mail zbiorczy co minutę** zamiast jednego maila na IP i poziom):
+- Każde zdarzenie od adresu, który w chwili zdarzenia jest na poziomie z kolumny „tak”, trafia do bufora alarmów.
+  Co `3600 / alert.max_per_hour` sekund (domyślnie 60 s) serwer wysyła **jeden** mail ze wszystkim z bufora;
+  pusty bufor = brak maila. Ataki trwające godzinę dają najwyżej 60 maili.
+- Wejście adresu na wyższy poziom niż poprzednio widziany jest w mailu oznaczone „NOWY POZIOM”.
+  Atakujący wracający po przerwie znów trafia do maili (nie ma pamięci „już zgłoszony” blokującej wysyłkę).
+- Adresy `suspicious` i `contact` nie trafiają do bufora (szum z Windowsów i pojedyncze próby).
+- Zdarzenia wczytywane z `events.jsonl` przy starcie nie trafiają do bufora; ustawiają tylko poziom „widziany”,
+  więc po restarcie dalszy atak nie jest oznaczany jako „NOWY POZIOM”.
+- Nieudana wysyłka: zawartość bufora zostaje i idzie w następnym mailu; bufor ma limit 1000 adresów
+  (nadmiar liczony i zgłaszany jako „pominięto N”).
 - Adresy loopback są pomijane (jak dziś w ocenie atakujących).
 
 ## 5. Treść maila
 
-- Temat: `[honeypot <agent_id>] <POZIOM> <IP>`, np. `[honeypot fs-finanse] BRUTE FORCE 192.168.56.4`.
-- Treść (zwykły tekst): poziom i powód po polsku, liczniki z `/api/attackers` (nieudane logowania, w 10 min,
-  porty, sonda, nieistniejące konta), pierwsze i ostatnie wystąpienie, do 10 ostatnich zdarzeń z tego IP
-  (czas, typ, serwis, konto, port), wskazówka jak otworzyć dashboard (tunel SSH).
+- Temat: `[honeypot <agent_id>] <N> atakujących, <M> zdarzeń (<HH:mm>–<HH:mm>)`.
+- Treść (zwykły tekst), dla każdego adresu od najgroźniejszego: IP, poziom po polsku, „NOWY POZIOM” jeśli dotyczy,
+  zdarzenia z tego okresu zliczone po typie i serwisie (np. `12× SMB · nieudane logowanie  konta: administrator, a.kowalska`,
+  do 5 nazw kont), liczniki łączne z `/api/attackers`; na końcu wskazówka, jak otworzyć dashboard (tunel SSH).
 - Nigdy: hasła (`event.credential`), surowa treść logów.
 
 ## 6. Architektura
 
 ```
 agent → POST /api/events → ReportStore.index() → ocena atakującego
-                                         └─ zmiana poziomu → AlertService.offer(snapshot)  (bez blokowania)
-AlertService: kolejka (ograniczona) + 1 wątek → reguły/limity → Mailer (Jakarta Mail, SMTP)
+                                         └─ zdarzenie od groźnego IP → AlertService.activity(notice)  (bez blokowania)
+AlertService: bufor per IP + zegar co 60 s → jeden mail zbiorczy → Mailer (Jakarta Mail, SMTP)
 ```
 
-- `ReportStore` po każdym `index()` sprawdza, czy poziom danego IP wzrósł ponad ostatnio zgłoszony; jeśli tak,
-  przekazuje migawkę (dane z `AttackerView` + ostatnie zdarzenia) do `AlertService`. W trakcie wczytywania historii
-  przy starcie przekazywanie jest wyłączone.
-- `AlertService` działa w osobnym wątku z ograniczoną kolejką; pełna kolejka = mail pominięty i policzony.
-  Błąd wysyłki: 3 próby z odstępem (np. 30 s, 2 min, 10 min), potem wpis w logu usługi.
+- `ReportStore` po każdym `index()` dla każdego dotkniętego IP na poziomie z `ALERT_LEVELS` przekazuje `AlertNotice`
+  (widok atakującego, czy to nowy poziom, bieżące zdarzenie bez hasła). W trakcie wczytywania historii przekazywanie jest wyłączone.
+- `AlertService` sumuje zdarzenia w buforze (krótka sekcja krytyczna, bez I/O) i co interwał wysyła jeden mail
+  z wątku zegara. Błąd wysyłki: wpis w logu usługi, bufor wraca i idzie w następnym mailu.
 - `Mailer`: Jakarta Mail (implementacja Eclipse Angus). STARTTLS i logowanie opcjonalne.
 - `alert.enabled=false` (domyślnie): nic nie jest wysyłane, ocena działa jak dotąd.
 

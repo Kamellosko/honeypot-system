@@ -32,6 +32,8 @@ public final class ReportStore {
     // remote IP seen here is hostile; these thresholds grade how hostile.
     private static final Duration FAIL_WINDOW = Duration.ofMinutes(10);
     private static final int FAIL_THRESHOLD = 5;            // brute force
+    // After this long without any activity from an IP, its next escalation is mailed again.
+    private static final Duration REARM_AFTER = Duration.ofMinutes(30);
     private static final Duration ENUM_WINDOW = Duration.ofSeconds(60);
     private static final int PORT_SCAN_THRESHOLD = 3;       // distinct local ports from one IP = scan
 
@@ -75,8 +77,9 @@ public final class ReportStore {
         boolean probed;           // service probe without a valid banner (net.probe, e.g. nmap -sV)
         long invalidUsers;        // logins to accounts that do not exist (auth.invalid_user)
         boolean decoyAttempt;     // tried to log in to a decoy account (confirmAccounts), even with a wrong password
-        String alertedLevel;      // highest level already reported (mailed, or seen while replaying history)
-        final Deque<AlertNotice.Recent> recent = new ArrayDeque<>();   // newest first, at most RECENT_MAX
+        String alertedLevel;      // highest alert level seen so far (live or replayed); cleared after REARM_AFTER of silence,
+                                  // so an attacker returning after a break is marked "NOWY POZIOM" again
+        Instant lastBruteForce;   // last time the failure window reached FAIL_THRESHOLD (stays after the window empties)
     }
 
     // Snapshot of an agent for GET /api/agents.
@@ -123,7 +126,8 @@ public final class ReportStore {
             @JsonProperty("last_operation") String lastOperation,
             @JsonProperty("probed") boolean probed,
             @JsonProperty("invalid_users") long invalidUsers,
-            @JsonProperty("decoy_attempt") boolean decoyAttempt) {
+            @JsonProperty("decoy_attempt") boolean decoyAttempt,
+            @JsonProperty("last_brute_force") String lastBruteForce) {
     }
 
     // Successful SSH login line; a login to one of confirmAccounts means the attacker used the breadcrumb password.
@@ -139,7 +143,6 @@ public final class ReportStore {
     // Levels worth an e-mail; lower ones (suspicious, contact) are mostly noise on a local network.
     public static final Set<String> ALERT_LEVELS = Set.of("fast_enum", "brute_force", "bait", "confirmed");
     private static final Set<String> AUTH_TYPES = Set.of("auth.failure", "auth.invalid_user", "auth.attempt");
-    private static final int RECENT_MAX = 10;
 
     private final JsonlLog log;
     private final Object lock = new Object();
@@ -308,8 +311,7 @@ public final class ReportStore {
         }
 
         String agentId = text(n, "agent_id");
-        remember(event, at);
-        escalate(agentId, at, notify);
+        alert(agentId, event, at, notify);
         if (agentId == null) {
             return;
         }
@@ -352,45 +354,47 @@ public final class ReportStore {
         if (s.firstSeen == null || at.isBefore(s.firstSeen)) {
             s.firstSeen = at;
         }
+        // Silence long enough: the IP is a fresh arrival again, so its next escalation is reported anew.
+        if (s.lastSeen != null && at.isAfter(s.lastSeen.plus(REARM_AFTER))) {
+            s.alertedLevel = null;
+        }
         touched.add(ip);
         return s;
     }
 
-    // Adds the event to its source's recent list (only what the mail may show: no password, no raw text).
-    private void remember(JsonNode event, Instant at) {
+    // Passes every touched attacker at an alarming level to the sink, marking the first time it reaches a level.
+    // While replaying history (notify=false) levels are only remembered. Caller holds lock.
+    private void alert(String agentId, JsonNode event, Instant at, boolean notify) {
         JsonNode src = event != null ? event.get("src") : null;
-        String ip = src != null ? text(src, "ip") : null;
-        AttackerState s = ip != null && touched.contains(ip) ? attackers.get(ip) : null;
-        if (s == null) {
-            return;
-        }
-        JsonNode user = event.get("user");
-        JsonNode port = src.get("port");
-        s.recent.addFirst(new AlertNotice.Recent(iso(at), text(event, "type"), text(event, "service"),
-                user != null ? text(user, "name") : null,
-                port != null && port.canConvertToInt() ? port.asInt() : null));
-        while (s.recent.size() > RECENT_MAX) {
-            s.recent.removeLast();
-        }
-    }
-
-    // Reports every touched attacker whose level rose above the one already reported. Caller holds lock.
-    private void escalate(String agentId, Instant at, boolean notify) {
+        String srcIp = src != null ? text(src, "ip") : null;
         for (String ip : touched) {
             AttackerState s = attackers.get(ip);
             if (s == null) {
                 continue;
             }
             String level = threatOf(s, at);
-            if (!ALERT_LEVELS.contains(level) || rank(level) <= rank(s.alertedLevel)) {
+            if (!ALERT_LEVELS.contains(level)) {
                 continue;
             }
-            s.alertedLevel = level;
+            boolean newLevel = rank(level) > rank(s.alertedLevel);
+            if (newLevel) {
+                s.alertedLevel = level;
+            }
             AlertSink sink = alertSink;
             if (notify && sink != null) {
-                sink.escalated(new AlertNotice(agentId, view(s, at), REASONS.get(level), List.copyOf(s.recent)));
+                AlertNotice.Recent detail = ip.equals(srcIp) ? recent(event, src, at) : null;
+                sink.activity(new AlertNotice(agentId, view(s, at), REASONS.get(level), newLevel, detail));
             }
         }
+    }
+
+    // Only what a mail may show: no password, no raw log text.
+    private static AlertNotice.Recent recent(JsonNode event, JsonNode src, Instant at) {
+        JsonNode user = event.get("user");
+        JsonNode port = src.get("port");
+        return new AlertNotice.Recent(iso(at), text(event, "type"), text(event, "service"),
+                user != null ? text(user, "name") : null,
+                port != null && port.canConvertToInt() ? port.asInt() : null);
     }
 
     private static final Map<String, String> REASONS = Map.of(
@@ -420,6 +424,9 @@ public final class ReportStore {
             s.authFailures++;
             s.failTimes.addLast(at);
             pruneOlderThan(s.failTimes, at.minus(FAIL_WINDOW));
+            if (s.failTimes.size() >= FAIL_THRESHOLD && (s.lastBruteForce == null || at.isAfter(s.lastBruteForce))) {
+                s.lastBruteForce = at;
+            }
         } else {
             s.connections++;
             if (localPort != null) {
@@ -514,7 +521,8 @@ public final class ReportStore {
         return new AttackerView(s.ip, s.mac, threatOf(s, now), iso(s.firstSeen), iso(s.lastSeen),
                 s.connections, s.authFailures, s.events, countSince(s.failTimes, now.minus(FAIL_WINDOW)),
                 countSince(s.eventTimes, now.minus(ENUM_WINDOW)), distinctPorts(s, now),
-                s.confirmed, s.breadcrumbRead, s.lastOperation, s.probed, s.invalidUsers, s.decoyAttempt);
+                s.confirmed, s.breadcrumbRead, s.lastOperation, s.probed, s.invalidUsers, s.decoyAttempt,
+                iso(s.lastBruteForce));
     }
 
     private static int rank(String threat) {

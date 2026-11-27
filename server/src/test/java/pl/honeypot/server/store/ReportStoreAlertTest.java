@@ -54,22 +54,37 @@ class ReportStoreAlertTest {
     }
 
     @Test
-    void bruteForceSendsOneNotice() throws Exception {
+    void belowAlertLevelNoNotice() throws Exception {
+        for (int i = 0; i < 4; i++) {
+            fail("203.0.113.9", "root");
+        }
+        assertTrue(notices.isEmpty());
+    }
+
+    @Test
+    void fifthFailureNotifiesWithNewLevel() throws Exception {
         for (int i = 0; i < 5; i++) {
             fail("203.0.113.9", "root");
         }
         assertEquals(1, notices.size());
-        assertEquals("brute_force", notices.get(0).attacker().threat());
-        assertEquals("203.0.113.9", notices.get(0).attacker().ip());
-        assertEquals("a1", notices.get(0).agentId());
+        AlertNotice n = notices.get(0);
+        assertEquals("brute_force", n.attacker().threat());
+        assertEquals("203.0.113.9", n.attacker().ip());
+        assertEquals("a1", n.agentId());
+        assertTrue(n.newLevel());
+        assertEquals("auth.failure", n.event().type());
+        assertEquals("root", n.event().user());
+        assertEquals(4242, n.event().port());
     }
 
     @Test
-    void sixthFailureDoesNotResend() throws Exception {
-        for (int i = 0; i < 6; i++) {
+    void laterActivityStillNotifiesWithoutNewLevel() throws Exception {
+        for (int i = 0; i < 7; i++) {
             fail("203.0.113.9", "root");
         }
-        assertEquals(1, notices.size());
+        assertEquals(3, notices.size());
+        assertFalse(notices.get(1).newLevel());
+        assertFalse(notices.get(2).newLevel());
     }
 
     @Test
@@ -85,6 +100,8 @@ class ReportStoreAlertTest {
         store.insert(report("port_scan", event("net.scan", "198.51.100.4", null, null), null));
         assertEquals(1, notices.size());
         assertEquals("fast_enum", notices.get(0).attacker().threat());
+        assertTrue(notices.get(0).newLevel());
+        assertEquals("net.scan", notices.get(0).event().type());
     }
 
     @Test
@@ -98,16 +115,18 @@ class ReportStoreAlertTest {
     }
 
     @Test
-    void breadcrumbReadIsBait() throws Exception {
+    void breadcrumbReadIsBaitWithoutEvent() throws Exception {
         store.insert(report("samba_audit", null,
                 ",\"content\":\"smbd_audit: bob|203.0.113.9|pc|Archiwum$|open|ok|IT/" + MARKER + "\","
                         + "\"network_context\":{\"endpoints\":[{\"ip\":\"203.0.113.9\"}]}"));
         assertEquals("bait", store.attackers().get(0).threat());
         assertEquals(1, notices.size());
+        assertTrue(notices.get(0).newLevel());
+        assertEquals(null, notices.get(0).event());   // v1-style report: nothing to show but the level
     }
 
     @Test
-    void escalationBruteThenConfirmedSendsTwo() throws Exception {
+    void escalationBruteThenConfirmedMarksNewLevelTwice() throws Exception {
         for (int i = 0; i < 5; i++) {
             fail("203.0.113.9", "root");
         }
@@ -115,10 +134,11 @@ class ReportStoreAlertTest {
                 ",\"content\":\"Accepted password for backup_srv from 203.0.113.9 port 1 ssh2\""));
         assertEquals(2, notices.size());
         assertEquals("confirmed", notices.get(1).attacker().threat());
+        assertTrue(notices.get(1).newLevel());
     }
 
     @Test
-    void replayedHistoryDoesNotNotifyAndIsRemembered() throws Exception {
+    void replayedHistoryIsQuietAndNotNewAfterRestart() throws Exception {
         for (int i = 0; i < 5; i++) {
             fail("203.0.113.9", "root");
         }
@@ -126,7 +146,8 @@ class ReportStoreAlertTest {
         store = open();   // restart: the same file is read back
         assertTrue(notices.isEmpty());
         fail("203.0.113.9", "root");
-        assertTrue(notices.isEmpty());
+        assertEquals(1, notices.size());   // the attack goes on, so it is mailed again
+        assertFalse(notices.get(0).newLevel());
     }
 
     @Test
@@ -138,17 +159,65 @@ class ReportStoreAlertTest {
     }
 
     @Test
-    void noticeHasRecentEventsWithoutPassword() throws Exception {
+    void noticeNeverCarriesPassword() throws Exception {
         store.insert(report("authentication_attempt",
-                event("auth.attempt", "203.0.113.9", "root", "{\"password\":\"Tajne123\"}"), null));
-        for (int i = 0; i < 5; i++) {   // auth.attempt is not a failure: 5 failures reach brute_force
-            fail("203.0.113.9", "admin" + i);
+                event("auth.attempt", "203.0.113.9", "backup_srv", "{\"password\":\"Tajne123\"}"), null));
+        assertEquals(1, notices.size());   // attempt on the decoy account: bait
+        assertEquals("auth.attempt", notices.get(0).event().type());
+        assertFalse(notices.get(0).toString().contains("Tajne123"));
+    }
+
+    @Test
+    void lastBruteForceSurvivesHigherLevel() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            fail("203.0.113.9", "root");
         }
-        var recent = notices.get(0).recent();
-        assertEquals(5, recent.size());   // auth.attempt does not touch scoring (its "Failed password" line does)
-        assertEquals("admin4", recent.get(0).user());
-        assertEquals("auth.failure", recent.get(0).type());
-        assertEquals(4242, recent.get(0).port());
-        assertFalse(recent.toString().contains("Tajne123"));
+        store.insert(report("authentication_success", null,
+                ",\"content\":\"Accepted password for backup_srv from 203.0.113.9 port 1 ssh2\""));
+        var a = store.attackers().get(0);
+        assertEquals("confirmed", a.threat());
+        assertTrue(a.lastBruteForce() != null);
+    }
+
+    @Test
+    void noBruteForceMeansNoLastBruteForce() throws Exception {
+        for (int i = 0; i < 4; i++) {
+            fail("203.0.113.9", "root");
+        }
+        assertEquals(null, store.attackers().get(0).lastBruteForce());
+    }
+
+    @Test
+    void alertIsRearmedAfterThirtyMinutesOfSilence() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            fail("203.0.113.9", "root");
+        }
+        assertEquals(1, notices.size());
+        // Push the stored history back an hour, then restart: the same IP returns after a long silence.
+        String old = Files.readString(file).replaceAll("\"received_at\":\"[^\"]+\"", "\"received_at\":\"2026-11-26T10:00:00Z\"");
+        Files.writeString(file, old);
+        notices.clear();
+        store = open();
+        assertTrue(notices.isEmpty());   // replay never mails
+        for (int i = 0; i < 5; i++) {
+            fail("203.0.113.9", "root");
+        }
+        assertEquals(1, notices.size());
+        assertEquals("brute_force", notices.get(0).attacker().threat());
+        assertTrue(notices.get(0).newLevel());   // back after a break: "NOWY POZIOM" again
+    }
+
+    @Test
+    void noRearmWithoutSilence() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            fail("203.0.113.9", "root");
+        }
+        notices.clear();
+        store = open();
+        for (int i = 0; i < 5; i++) {
+            fail("203.0.113.9", "root");
+        }
+        assertEquals(5, notices.size());   // the attack goes on, so every minute mails it
+        assertTrue(notices.stream().noneMatch(AlertNotice::newLevel));   // but it is not a new level
     }
 }

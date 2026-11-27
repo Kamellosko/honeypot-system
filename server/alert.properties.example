@@ -1,0 +1,20 @@
+# Alarmy e-mail (mail zbiorczy co minutę o SKANERACH, BRUTE FORCE, PRZYNĘTACH i POTWIERDZONYCH).
+# Skopiuj do server/alert.properties i uzupełnij. Instalator serwera (install-server-service.sh, install-all.sh)
+# wpisze te linie do /etc/sysmon/collector.properties i zrestartuje usługę. server/alert.properties nie trafia do gita.
+#
+# Bez tego pliku instalator zostawia ustawienia alert.* już zapisane na maszynie.
+
+alert.enabled=true
+# Serwer pocztowy: w laboratorium host z VirtualBoxa (scripts/setup-mail-host.sh), port 25 bez logowania.
+alert.smtp.host=192.168.56.1
+alert.smtp.port=25
+alert.from=honeypot@fs-finanse.local
+# Odbiorca; kilku po przecinku. W laboratorium: <login-na-hoscie>@localhost
+alert.to=<login-na-hoscie>@localhost
+
+# Opcjonalnie (serwer wymagający szyfrowania i logowania; hasło odczyta każdy z rootem na wabiku):
+#alert.smtp.starttls=true
+#alert.smtp.user=
+#alert.smtp.password=
+# Najwyżej tyle maili na godzinę (60 = jeden zbiorczy co minutę):
+#alert.max_per_hour=60

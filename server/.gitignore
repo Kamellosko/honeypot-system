@@ -1,3 +1,6 @@
 /target/
 /data/
 /certs/
+
+# Prawdziwe ustawienia alarmów (adresy odbiorców); w repo jest tylko alert.properties.example.
+/alert.properties

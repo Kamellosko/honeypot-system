@@ -58,9 +58,16 @@ chmod -R u=rwX,go=rX /opt/sysmon/dashboard   # umask 077 zrobiłby go nieczyteln
 echo ">> Konfiguracja + keystore -> /etc/sysmon"
 install -d -o root -g root /etc/sysmon
 install -m 600 -o sysmon -g sysmon "$KEYSTORE" /etc/sysmon/collector.p12
-# Ustawienia alarmów (alert.*) wpisuje administrator ręcznie; aktualizacja nie może ich skasować.
+# Ustawienia alarmów (alert.*): z server/alert.properties, a bez niego te już zapisane na maszynie
+# (aktualizacja nie może ich skasować).
+ALERT_FILE="$SERVER_DIR/alert.properties"
 ALERT_LINES=""
-[ -f /etc/sysmon/collector.properties ] && ALERT_LINES="$(grep '^alert\.' /etc/sysmon/collector.properties || true)"
+if [ -f "$ALERT_FILE" ]; then
+  ALERT_LINES="$(grep '^alert\.' "$ALERT_FILE" || true)"
+  grep -q '<' <<<"$ALERT_LINES" && { echo "Uzupełnij $ALERT_FILE (zostało <...> z przykładu)" >&2; exit 1; }
+elif [ -f /etc/sysmon/collector.properties ]; then
+  ALERT_LINES="$(grep '^alert\.' /etc/sysmon/collector.properties || true)"
+fi
 install -m 640 -o root -g sysmon /dev/null /etc/sysmon/collector.properties
 tee /etc/sysmon/collector.properties >/dev/null <<EOF
 server.bind=127.0.0.1
@@ -72,7 +79,7 @@ dashboard.dir=/opt/sysmon/dashboard
 EOF
 if [ -n "$ALERT_LINES" ]; then
   printf '%s\n' "$ALERT_LINES" >> /etc/sysmon/collector.properties
-  echo "   zachowano ustawienia alarmów (alert.*)"
+  [ -f "$ALERT_FILE" ] && echo "   alarmy e-mail z $ALERT_FILE" || echo "   zachowano ustawienia alarmów (alert.*)"
 fi
 chmod 640 /etc/sysmon/collector.properties
 chown root:sysmon /etc/sysmon/collector.properties
