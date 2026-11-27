@@ -266,6 +266,12 @@ function renderAgents(agents) {
   }
 }
 
+// Second badge for an IP that reached the brute-force threshold but is graded higher (or has calmed down since).
+function bruteTag(a) {
+  if (!a.last_brute_force || a.threat === "brute_force") return "";
+  return ` ${threatBadge("brute_force")} <span class="sub" title="${esc(fmtTime(a.last_brute_force))}">${relTime(a.last_brute_force)}</span>`;
+}
+
 function renderAttackers(list) {
   threatByIp = new Map(list.map((a) => [a.ip, a.threat]));
   const body = el("attackers");
@@ -288,7 +294,7 @@ function renderAttackers(list) {
     const tone = (THREATS[a.threat] || {}).tone || "info";
     return `<tr class="row-${tone}">
       <td>${ipTag(a.ip, null, false)}${a.mac ? ` <span class="sub">${esc(a.mac)}</span>` : ""}</td>
-      <td>${threatBadge(a.threat)}</td>
+      <td>${threatBadge(a.threat)}${bruteTag(a)}</td>
       <td>${esc(a.auth_failures)} <span class="sub">(${esc(a.failures_10m)} w 10 min)</span></td>
       <td>${signals.join(", ") || "<span class='sub'>—</span>"}</td>
       <td>${relTime(a.first_seen)}</td>
@@ -306,11 +312,51 @@ function filterByIp(ip) {
   el("filter-text").scrollIntoView({ block: "nearest" });
 }
 
+// Failed logins from one IP with the same login and (when the PAM hook captured it) the same password are one
+// attempt repeated. The log keeps every report; only this list folds a flood into a single row.
+const GROUP_TYPES = ["auth.failure", "auth.invalid_user", "auth.denied", "auth.attempt"];
+const GROUP_GAP_MS = 10 * 60 * 1000;   // a pause longer than this starts a new row
+
+function groupKey(r) {
+  const ev = r.event;
+  if (!ev || !GROUP_TYPES.includes(ev.type)) return null;
+  // Samba writes one failed login as several lines; the follow-up ones carry no address in the text, only in the
+  // per-client log file name (log.<ip>), so that path stands in for the source.
+  const from = ev.src && ev.src.ip ? ev.src.ip : (ev.service === "smb" && r.path ? "file:" + r.path : null);
+  if (!from) return null;
+  const cred = ev.credential ? (ev.credential.password ?? ev.credential.password_base64 ?? "") : "";
+  return [ev.type, ev.service || "", from, ev.user ? ev.user.name : "", cred].join("\u0001");
+}
+
+// events are newest first; returns [{ r: newest report, count, from: oldest time, to: newest time }]
+function groupEvents(events) {
+  const out = [];
+  const open = new Map();
+  for (const r of events) {
+    const when = r.observed_at || r.received_at;
+    const t = Date.parse(when);
+    const key = groupKey(r);
+    const g = key ? open.get(key) : null;
+    if (g && g.oldest - t <= GROUP_GAP_MS) {
+      g.count++;
+      g.oldest = t;
+      g.from = when;
+      continue;
+    }
+    const ng = { r, count: 1, oldest: t, from: when, to: when };
+    out.push(ng);
+    if (key) open.set(key, ng);
+  }
+  return out;
+}
+
 function renderEvents(events, fetched) {
   const total = fetched.length;
   el("shown-count").textContent = events.length < total
     ? `${events.length} z ${total} pobranych`
     : `${total} zdarzeń`;
+  const folded = groupEvents(events);
+  if (folded.length < events.length) el("shown-count").textContent += ` · ${folded.length} wierszy po zgrupowaniu`;
 
   // Same rows as last time: leave the table alone so selection and focus survive.
   const signature = events.map((r) => r.report_id).join(",")
@@ -332,8 +378,9 @@ function renderEvents(events, fetched) {
 
   let day = null;
   const rows = [];
-  for (const r of events) {
-    reportsById.set(r.report_id, r);
+  for (const r of events) reportsById.set(r.report_id, r);
+  for (const g of folded) {
+    const r = g.r;
     const when = r.observed_at || r.received_at;
     const d = dayOf(when);
     if (d !== day) {
@@ -344,12 +391,12 @@ function renderEvents(events, fetched) {
     const tone = eventTone(r);
     const mark = tone === "danger" ? "! " : tone === "warn" ? "~ " : "";
     rows.push(`<tr class="clickable row-${tone}" tabindex="0" data-id="${esc(r.report_id)}">
-      <td class="time" title="${esc(when)}">${clock(when)}</td>
+      <td class="time" title="${esc(when)}">${g.count > 1 ? `${clock(g.from)}–${clock(when)}` : clock(when)}</td>
       <td>${esc(r.agent_id)}</td>
       <td class="src-${esc(r.source)}">${esc(r.source)}</td>
       <td>${esc(r.operation)}</td>
       <td class="c-${tone}">${mark}${esc(cls || "—")}</td>
-      <td class="details">${summarize(r)}</td>
+      <td class="details">${summarize(r)}${g.count > 1 ? ` <span class="badge badge-info" title="identyczne próby: ten sam adres, login i hasło, przerwy do 10 min">×${g.count}</span>` : ""}</td>
       <td>${stateCell(r)}</td>
     </tr>`);
   }

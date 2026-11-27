@@ -114,7 +114,8 @@ Zdalne IP z połączeń TCP i nieudanych logowań, stopniowane po zachowaniu: `c
 `fast_enum` (≥ 3 różne porty z jednego IP w 60 s) → `brute_force` (≥ 5 nieudanych logowań w 10 min) →
 `confirmed` (udane logowanie na konto z `detection.confirm.accounts`). Loopback jest pomijany.
 Pola: `ip`, `mac`, `threat`, `first_seen`, `last_seen`, `connections`, `auth_failures`, `events`,
-`failures_10m`, `events_1m`, `distinct_ports`, `confirmed`, `breadcrumb_read`, `last_operation`.
+`failures_10m`, `events_1m`, `distinct_ports`, `confirmed`, `breadcrumb_read`, `last_operation`, `last_brute_force`
+(czas ostatniego przekroczenia progu brute force albo `null`; zostaje po wygaśnięciu okna 10 min i obok wyższych poziomów).
 Szczegóły i progi: [`attacker-detection.md`](attacker-detection.md).
 
 ## 6. Wersja (GET /api/version)

@@ -50,7 +50,7 @@ class AlertServiceTest {
 
     private static AlertNotice notice(String ip, String threat, boolean newLevel, String type, String service, String user) {
         AttackerView v = new AttackerView(ip, null, threat, "2026-11-26T09:58:00Z", "2026-11-26T10:00:00Z",
-                0, 41, 41, 5, 5, 0, false, false, "append", false, 0, false);
+                0, 41, 41, 5, 5, 0, false, false, "append", false, 0, false, null);
         return new AlertNotice("fs-finanse", v, "5+ nieudanych logowań w 10 min", newLevel,
                 type == null ? null : new AlertNotice.Recent("2026-11-26T10:00:30Z", type, service, user, 49282));
     }
