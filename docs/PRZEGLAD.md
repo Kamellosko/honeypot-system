@@ -113,9 +113,9 @@ Serwer serwuje też sam dashboard z katalogu `dashboard/`.
 
 ### Alarmy e-mail
 
-Gdy adres IP wejdzie na poziom `fast_enum` (skaner), `brute_force`, `bait` (próba na konto-przynętę albo odczyt okruszka) lub `confirmed`,
-serwer wysyła jeden mail. Pojedyncze nieudane logowania nie wysyłają maila (to głównie szum z Windowsów). Limit 60 maili na godzinę,
-bez haseł w treści. Domyślnie wyłączone; w laboratorium poczta trafia do lokalnej skrzynki na hoście (`scripts/setup-mail-host.sh`,
+Co minutę, jeśli coś się działo, serwer wysyła jeden zbiorczy mail o adresach na poziomie `fast_enum` (skaner), `brute_force`,
+`bait` (próba na konto-przynętę albo odczyt okruszka) lub `confirmed`: co robiły w tej minucie (zliczone po typie, z kontami) i czy weszły
+na nowy poziom. Pojedyncze nieudane logowania nie trafiają do maili (to głównie szum z Windowsów). Najwyżej 60 maili na godzinę, bez haseł w treści. Domyślnie wyłączone; w laboratorium poczta trafia do lokalnej skrzynki na hoście (`scripts/setup-mail-host.sh`,
 `WDROZENIE-OD-ZERA.md` rozdz. 10a).
 
 ### Dashboard (`dashboard/app.js`)

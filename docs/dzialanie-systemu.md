@@ -356,8 +356,9 @@ Skutki: awaria serwera nie gubi danych (kolejka rośnie do 10 000); dostawa to *
 - **Ocena atakujących** (`/api/attackers`): `confirmed` (udane logowanie na konto-przynętę) > `bait` (próba na konto-przynętę albo odczyt
   okruszka) > `brute_force` (5+ nieudanych logowań w 10 min) > `fast_enum` (skan albo 3+ porty w minutę) > `suspicious` (pojedyncze nieudane
   logowanie, sonda usługi, nieistniejące konto) > `contact`. Szczegóły: `DOKUMENTACJA-TECHNICZNA.md`, rozdz. 7.
-- **Alarmy e-mail** (`alert.enabled=true`): jeden mail, gdy IP wejdzie na `fast_enum`, `brute_force`, `bait` lub `confirmed` wyżej niż ostatnio
-  zgłoszony; limit 60 na godzinę, wysyłka w osobnym wątku, bez haseł w treści, bez maili za historię wczytaną przy starcie.
+- **Alarmy e-mail** (`alert.enabled=true`): co minutę jeden zbiorczy mail o aktywności adresów na poziomie `fast_enum`, `brute_force`, `bait`
+  lub `confirmed` (zliczone zdarzenia, konta, „NOWY POZIOM"); spokojna minuta = brak maila. Wysyłka w osobnym wątku, bez haseł w treści,
+  bez maili za historię wczytaną przy starcie.
   Konfiguracja: `WDROZENIE-OD-ZERA.md`, rozdz. 10a.
 - **API odczytu** (bez uwierzytelniania): `GET /api/agents`, `GET /api/events?agent_id=&source=&limit=` (od najnowszych
   wg kolejności zapisu), `GET /api/stats`, `GET /api/attackers` (wykryci atakujący, stopniowani po zachowaniu,
@@ -476,7 +477,7 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
 | Maks. żądanie na serwerze | 32 MiB | `Main.java` |
 | Odświeżanie dashboardu | 4 s | `app.js` |
 | Brute force / skaner | 5 nieudanych w 10 min / 3 porty w 60 s | `ReportStore.java` |
-| Alarmy e-mail | 60 na godzinę, kolejka 100, ponowienia 30 s / 2 min / 10 min | `AlertService.java`, `alert.max_per_hour` |
+| Alarmy e-mail | mail zbiorczy co 3600/`alert.max_per_hour` s (60 s), bufor 1000 adresów, nieudany mail idzie w następnym | `AlertService.java` |
 
 ## 15. Jak to sprawdzić na maszynie H
 

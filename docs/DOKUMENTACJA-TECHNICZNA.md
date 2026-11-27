@@ -1740,15 +1740,18 @@ i spada do `suspicious`/`contact`, mimo że `auth_failures` (licznik łączny) p
 Pakiet `pl.honeypot.server.alert`; włączane kluczem `alert.enabled=true` (rozdz. 6.1). Projekt: `docs/superpowers/specs/2026-11-26-alerty-email-design.md`,
 konfiguracja krok po kroku: `docs/WDROZENIE-OD-ZERA.md`, rozdz. 10a.
 
-- **Kiedy.** `ReportStore` po każdym przyjętym raporcie liczy poziom adresów, których raport dotyczył. Gdy poziom jest w `ALERT_LEVELS`
-  (`fast_enum`, `brute_force`, `bait`, `confirmed`) i jest wyższy niż ostatnio zgłoszony dla tego IP, woła `AlertSink.escalated(AlertNotice)`.
-  Ten sam IP na tym samym lub niższym poziomie nie dostaje kolejnego maila; poziom „zgłoszony" jest pamiętany bez limitu czasu.
-- **Start.** Raporty wczytywane z `events.jsonl` ustawiają poziom „zgłoszony", ale maili nie wysyłają, więc restart nie powtarza alarmów.
-- **Wysyłka.** `AlertService`: kolejka 100 pozycji i jeden wątek `alert-mailer`; `escalated` nigdy nie czeka (pełna kolejka = alarm pominięty
-  i policzony). Limit `alert.max_per_hour` w oknie przesuwnym 1 h; pominięte alarmy są wymienione w następnym wysłanym mailu („pominięto N").
-  Błąd SMTP: ponowienia po 30 s, 2 min i 10 min, potem wpis `alert: mail not sent ...` w logu usługi.
-- **Treść.** Temat `[honeypot <agent_id>] <POZIOM> <IP>`; treść: powód, liczniki z `/api/attackers`, do 10 ostatnich zdarzeń z tego IP
-  (czas, typ, serwis, konto, port źródłowy). Bez haseł (`event.credential`) i bez surowej treści logów.
+- **Kiedy.** Mail zbiorczy co `3600 / alert.max_per_hour` sekund (domyślnie co 60 s), tylko jeśli w tym czasie coś się wydarzyło.
+  `ReportStore` po każdym przyjętym raporcie liczy poziom adresów, których raport dotyczył, i dla każdego adresu na poziomie z `ALERT_LEVELS`
+  (`fast_enum`, `brute_force`, `bait`, `confirmed`) woła `AlertSink.activity(AlertNotice)`. Adresy `suspicious` i `contact` nie trafiają do maili.
+  `AlertNotice.newLevel` oznacza pierwsze wejście adresu na dany poziom (w mailu: „NOWY POZIOM"). Atak trwający dalej trafia do kolejnych maili.
+- **Start.** Raporty wczytywane z `events.jsonl` nie trafiają do maili; ustawiają tylko poziom „widziany", więc po restarcie trwający atak
+  nie jest drugi raz oznaczany jako „NOWY POZIOM".
+- **Wysyłka.** `AlertService`: bufor per IP (maks. 1000 adresów, nadmiar liczony jako „pominięto N") i zegar w wątku `alert-mailer`;
+  `activity` tylko dopisuje do bufora w pamięci. Błąd SMTP: wpis `alert: mail not sent ...` w logu usługi, a zawartość bufora idzie
+  w następnym mailu (z czasem od początku niewysłanego okresu).
+- **Treść.** Temat `[honeypot <agent_id>] <N> atakujących, <M> zdarzeń (<od>–<do>)`; dla każdego adresu (najgroźniejsze pierwsze): poziom,
+  „NOWY POZIOM", powód, zdarzenia z okresu zliczone po typie i serwisie z maks. 5 nazwami kont (np. `12× SMB · nieudane logowanie   konta: administrator`),
+  liczniki łączne z `/api/attackers`. Bez haseł (`event.credential`) i bez surowej treści logów.
 - **SMTP.** `SmtpMailer` (Jakarta Mail, implementacja Eclipse Angus), limity czasu 10 s; STARTTLS i logowanie tylko gdy ustawione.
 - **Test.** `java -jar collector.jar --test-alert <plik.properties>` wysyła jeden mail „[honeypot] test alarmu" na podstawie samych kluczy `alert.*`
   (bez keystore); kod wyjścia 0 = wysłano.
