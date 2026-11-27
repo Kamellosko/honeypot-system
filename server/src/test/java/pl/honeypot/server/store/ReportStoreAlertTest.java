@@ -204,6 +204,7 @@ class ReportStoreAlertTest {
         }
         assertEquals(1, notices.size());
         assertEquals("brute_force", notices.get(0).attacker().threat());
+        assertTrue(notices.get(0).newLevel());   // back after a break: "NOWY POZIOM" again
     }
 
     @Test
@@ -216,6 +217,7 @@ class ReportStoreAlertTest {
         for (int i = 0; i < 5; i++) {
             fail("203.0.113.9", "root");
         }
-        assertTrue(notices.isEmpty());
+        assertEquals(5, notices.size());   // the attack goes on, so every minute mails it
+        assertTrue(notices.stream().noneMatch(AlertNotice::newLevel));   // but it is not a new level
     }
 }
