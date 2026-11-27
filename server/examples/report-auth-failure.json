@@ -1,0 +1,49 @@
+{
+  "schema_version": 2,
+  "agent_version": "0.2.0",
+  "report_id": "242d0adf00ef563f9c8c249cb8ca2b97cac096a82ef14d317693348c4d00904c",
+  "agent_id": "alma10-01",
+  "observed_at": "2026-11-20T10:19:22Z",
+  "source": "log",
+  "operation": "append",
+  "path": "/var/log/secure",
+  "metadata": {},
+  "analysis": {
+    "classification": "authentication_failure"
+  },
+  "event": {
+    "category": "authentication",
+    "type": "auth.failure",
+    "severity": "medium",
+    "outcome": "failure",
+    "service": "ssh",
+    "action": null,
+    "src": {
+      "ip": "203.0.113.9",
+      "port": 4242,
+      "mac": null
+    },
+    "dst": null,
+    "user": {
+      "name": "admin"
+    }
+  },
+  "network_context": {
+    "endpoints": [
+      {
+        "ip": "203.0.113.9",
+        "mac": null,
+        "interface": null,
+        "mac_status": "not_looked_up",
+        "mac_source": "none",
+        "context_only": true
+      }
+    ],
+    "truncated": false
+  },
+  "evidence": [],
+  "content_changes": null,
+  "complete": true,
+  "error": null,
+  "content": "Failed password for invalid user admin from 203.0.113.9 port 4242 ssh2"
+}

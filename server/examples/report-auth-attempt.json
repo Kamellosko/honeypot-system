@@ -1,0 +1,53 @@
+{
+  "schema_version": 2,
+  "agent_version": "0.3.0",
+  "report_id": "dc55d846066a0319b2a4867c24c0bc0c14eb9a2ec2723cf4c7a7c2ac10de33da",
+  "agent_id": "alma10-01",
+  "observed_at": "2026-11-20T19:11:00Z",
+  "source": "log",
+  "operation": "append",
+  "path": "/var/log/secure",
+  "metadata": {},
+  "analysis": {
+    "classification": "authentication_attempt"
+  },
+  "event": {
+    "category": "authentication",
+    "type": "auth.attempt",
+    "severity": "medium",
+    "outcome": "failure",
+    "service": "ssh",
+    "action": null,
+    "src": {
+      "ip": "203.0.113.9",
+      "port": null,
+      "mac": null
+    },
+    "dst": null,
+    "user": {
+      "name": "admin"
+    },
+    "credential": {
+      "password": "Lato2024!"
+    },
+    "detail": null
+  },
+  "network_context": {
+    "endpoints": [
+      {
+        "ip": "203.0.113.9",
+        "mac": null,
+        "interface": null,
+        "mac_status": "not_looked_up",
+        "mac_source": "none",
+        "context_only": true
+      }
+    ],
+    "truncated": false
+  },
+  "evidence": [],
+  "content_changes": null,
+  "complete": true,
+  "error": null,
+  "content": "Nov 20 12:00:00 honey hp-pam: u=YWRtaW4= h=203.0.113.9 p=TGF0bzIwMjQh"
+}

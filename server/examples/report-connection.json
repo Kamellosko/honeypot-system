@@ -1,14 +1,39 @@
 {
-  "schema_version": 1,
-  "report_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "schema_version": 2,
+  "agent_version": "0.2.0",
+  "report_id": "81f64d4ecdd41fe6f227ec3cf5d3d1adfcd4e7728f6995d700ff955e72f500cf",
   "agent_id": "alma10-01",
-  "observed_at": "2026-10-18T12:01:00Z",
+  "observed_at": "2026-11-20T10:19:22Z",
   "source": "network",
   "operation": "tcp_connection_observed",
   "path": "",
-  "analysis": { "classification": "tcp_connection", "actor": null },
+  "event": {
+    "category": "network",
+    "type": "net.connection",
+    "severity": "low",
+    "outcome": "unknown",
+    "service": "smb",
+    "action": null,
+    "src": {
+      "ip": "192.0.2.50",
+      "port": 51000,
+      "mac": null
+    },
+    "dst": {
+      "ip": "10.0.0.2",
+      "port": 445
+    },
+    "user": null
+  },
+  "metadata": {},
+  "analysis": {
+    "classification": "tcp_connection",
+    "actor": null
+  },
   "evidence": [],
   "content_changes": null,
+  "complete": true,
+  "error": null,
   "connection": {
     "protocol": "tcp",
     "state": "ESTABLISHED",
@@ -19,13 +44,11 @@
     "peer_port": 51000,
     "peer": {
       "ip": "192.0.2.50",
-      "mac": "02:42:ac:11:00:05",
-      "interface": "eth0",
-      "mac_status": "resolved",
+      "mac": null,
+      "interface": null,
+      "mac_status": "not_in_local_arp_cache",
       "mac_source": "local_arp_cache_at_report_time",
       "context_only": true
     }
-  },
-  "complete": true,
-  "error": null
+  }
 }

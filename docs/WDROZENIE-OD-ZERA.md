@@ -315,6 +315,66 @@ na hoście jest zajęty (np. stary tunel): użyj innego, np. `-L 9443:127.0.0.1:
 Tunel i logowania administratora **są widoczne dla agenta** jako połączenia na porty 22 i 8443. Wabik ma stać
 w izolowanej sieci, a własne wpisy rozpoznajesz po adresie hosta (`192.168.56.1`).
 
+## 10a. Alarmy e-mail
+
+Serwer wysyła mail, gdy adres IP wchodzi na poziom SKANER (`fast_enum`), BRUTE FORCE, PRZYNĘTA (próba logowania
+na `backup_srv` albo odczyt pliku-przynęty) lub POTWIERDZONY. Pojedyncze nieudane logowania, sondy i nieistniejące konta
+maila nie wysyłają (to głównie szum, np. Windows sam logujący się do udziału). Jeden IP dostaje mail tylko przy wejściu
+na wyższy poziom; limit to 60 maili na godzinę, a zdarzenia z historii wczytanej przy starcie nie wysyłają maili.
+W treści nie ma haseł. Domyślnie alarmy są wyłączone.
+
+### 10a.1 Skrzynka w laboratorium **[Host]**
+
+Poczta trafia do lokalnej skrzynki na hoście, czytanej Thunderbirdem; nic nie wychodzi do internetu.
+
+```bash
+cd ~/honeypot-system && sudo ./scripts/setup-mail-host.sh
+```
+
+Skrypt instaluje Postfix i Dovecot, przyjmuje pocztę tylko od wabika (`HP_IP`, domyślnie `192.168.56.6`) i z hosta,
+udostępnia skrzynkę `~/Maildir` przez IMAP tylko na `127.0.0.1` i wysyła mail testowy (`OK: mail testowy jest w ...`).
+
+Thunderbird: nowe konto pocztowe, adres `<login>@localhost`, **Konfiguruj ręcznie**:
+
+| | Serwer | Port | Bezpieczeństwo | Uwierzytelnianie |
+|---|---|---|---|---|
+| IMAP | `localhost` | 143 | STARTTLS | zwykłe hasło (hasło konta na hoście) |
+| SMTP | `localhost` | 25 | STARTTLS | brak (albo zwykłe hasło, jeśli „brak” niedostępne) |
+
+Certyfikat jest samopodpisany: potwierdź wyjątek bezpieczeństwa.
+
+### 10a.2 Włączenie na wabiku **[Alma]**
+
+Dopisz na końcu `/etc/sysmon/collector.properties` (instalator serwera zachowuje linie `alert.*` przy aktualizacji):
+
+```properties
+alert.enabled=true
+alert.smtp.host=192.168.56.1
+alert.smtp.port=25
+alert.from=honeypot@fs-finanse.local
+alert.to=<login-na-hoscie>@localhost
+```
+
+```bash
+sudo /usr/lib/jvm/java-21-openjdk/bin/java -jar /opt/sysmon/collector.jar --test-alert /etc/sysmon/collector.properties
+sudo systemctl restart sysmon-collector
+```
+
+`--test-alert` wysyła jeden mail „[honeypot] test alarmu” i kończy się kodem 0. Błąd `Connection refused` albo timeout:
+host nie słucha na `192.168.56.1:25` (sprawdź na hoście `ss -ltn | grep :25`) albo zapora hosta blokuje Almę.
+Po restarcie w `journalctl -u sysmon-collector` jest linia `alert: mail via 192.168.56.1:25 to 1 recipient(s)`.
+
+Opcjonalnie: `alert.smtp.starttls=true`, `alert.smtp.user=`, `alert.smtp.password=` (serwer wymagający logowania),
+`alert.max_per_hour=60`, kilku odbiorców w `alert.to` po przecinku.
+
+### 10a.3 Sieć docelowa
+
+Zmieniasz tylko `alert.smtp.*`, `alert.from` i `alert.to`, potem restart usługi; kod się nie zmienia.
+Najlepiej, gdy firmowy serwer pocztowy przyjmuje pocztę z IP wabika **bez hasła** (hasło w `collector.properties`
+odczyta każdy, kto zdobędzie roota na wabiku). Przy samym Microsoft 365 administrator dodaje łącznik SMTP dla adresu
+wabika albo stawia się przekaźnik jak w 10a.1. W zaporze sieci wabika zezwól na dokładnie jedno połączenie:
+wabik → serwer pocztowy, port 25 lub 587.
+
 ## 11. Utwardzenie końcowe i sprzątanie
 
 Robisz to **na końcu**, gdy wszystko działa i masz zapisane hasła. Kolejność ma znaczenie.

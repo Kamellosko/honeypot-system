@@ -1,4 +1,5 @@
 #pragma once
+#include "scan.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <time.h>
@@ -38,5 +39,6 @@ int hp_snapshot_event(struct hp_store *store, int root_fd, const char *root_path
 int hp_report_simple(struct hp_store *store, const char *source, const char *operation,
                      const char *path, const char *error, const unsigned char *content,
                      size_t content_size);
+int hp_report_scan(struct hp_store *store, const struct hp_scan_hit *hit);
 int hp_report_connection(struct hp_store *store, const char *local_ip, unsigned short local_port,
                           const char *peer_ip, unsigned short peer_port);

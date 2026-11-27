@@ -1,13 +1,27 @@
 {
-  "schema_version": 1,
-  "report_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "schema_version": 2,
+  "agent_version": "0.2.0",
+  "report_id": "b7ffb4ed96a6b583d34865e094c28da8a2bfe2235d60a01be3ad70965ff2d072",
   "agent_id": "alma10-01",
-  "observed_at": "2026-10-18T12:02:00Z",
+  "observed_at": "2026-11-20T10:19:22Z",
   "source": "system",
   "operation": "heartbeat",
   "path": "",
   "metadata": {},
-  "analysis": { "classification": "unknown" },
+  "analysis": {
+    "classification": "heartbeat"
+  },
+  "event": {
+    "category": "system",
+    "type": "system.heartbeat",
+    "severity": "info",
+    "outcome": "unknown",
+    "service": null,
+    "action": null,
+    "src": null,
+    "dst": null,
+    "user": null
+  },
   "evidence": [],
   "content_changes": null,
   "complete": true,

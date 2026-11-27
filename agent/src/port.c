@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "port.h"
+#include "config.h"
 #include "snapshot.h"
 #include "io.h"
 #include <curl/curl.h>
@@ -48,6 +49,8 @@ int hp_send_pending(struct hp_store *store, const char *ip, unsigned short port)
     struct curl_slist *headers = NULL;
     int acknowledged = 0;
     int rejected = 0;   // server answered with a final 3xx/4xx: retrying can never succeed
+    long status = 0;
+    CURLcode result = CURLE_FAILED_INIT;
     int retry_later = 0;   // server answered 5xx/408/429: this report may be fine, try the next one
     int n = snprintf(url, sizeof(url), strchr(ip, ':') ? "https://[%s]:%hu/events" : "https://%s:%hu/events", ip, port);
     if (n < 0 || n >= (int)sizeof(url) || setvbuf(input, input_buffer, _IOFBF, sizeof(input_buffer))) {
@@ -73,14 +76,14 @@ int hp_send_pending(struct hp_store *store, const char *ip, unsigned short port)
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, discard_response) != CURLE_OK) {
       delivered = -1; goto cleanup;
     }
-    long status = 0;
-    CURLcode result = curl_easy_perform(curl);
+    result = curl_easy_perform(curl);
     if (result == CURLE_OK && curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status) == CURLE_OK) {
       acknowledged = status >= 200 && status < 300;
       rejected = status >= 300 && status < 500 && status != 408 && status != 429;
       retry_later = status >= 500 || status == 408 || status == 429;
     }
 cleanup:
+    hp_dev_log("send report_id=%.64s http=%ld curl=%d\n", ent->d_name, status, (int)result);
     curl_slist_free_all(headers);
     if (curl) curl_easy_cleanup(curl);
     if (fclose(input)) { acknowledged = 0; delivered = -1; }

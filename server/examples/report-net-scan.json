@@ -1,0 +1,43 @@
+{
+  "schema_version": 2,
+  "agent_version": "0.3.0",
+  "report_id": "06b55d2d4e9075006cc111f9d5e8539316301c127b449623f86401ae10d996a4",
+  "agent_id": "alma10-01",
+  "observed_at": "2026-11-20T19:11:00Z",
+  "source": "network",
+  "operation": "port_scan_detected",
+  "path": "",
+  "event": {
+    "category": "network",
+    "type": "net.scan",
+    "severity": "medium",
+    "outcome": "unknown",
+    "service": null,
+    "action": null,
+    "src": {
+      "ip": "192.0.2.50",
+      "port": null,
+      "mac": null
+    },
+    "dst": {
+      "ip": "10.0.0.2",
+      "port": null
+    },
+    "user": null,
+    "credential": null,
+    "detail": {
+      "ports": 12,
+      "scan": "syn",
+      "window_seconds": 10
+    }
+  },
+  "metadata": {},
+  "analysis": {
+    "classification": "port_scan",
+    "actor": null
+  },
+  "evidence": [],
+  "content_changes": null,
+  "complete": true,
+  "error": null
+}

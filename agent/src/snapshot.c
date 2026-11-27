@@ -1,6 +1,8 @@
 #define _GNU_SOURCE
 #include "snapshot.h"
 #include "protocol.h"
+#include "event.h"
+#include "config.h"
 #include "network.h"
 #include "diff.h"
 #include "io.h"
@@ -384,7 +386,7 @@ static FILE *report_begin(struct hp_store *s, const char *source, const char *op
   if (setvbuf(out, s->report_buffer, _IOFBF, sizeof(s->report_buffer))) {
     fclose(out); unlinkat(s->pending_fd, tmp, 0); return NULL;
   }
-  fprintf(out, "{\"schema_version\":1,\"report_id\":\"%s\",\"agent_id\":", id);
+  fprintf(out, "{\"schema_version\":2,\"agent_version\":\"%s\",\"report_id\":\"%s\",\"agent_id\":", HP_VERSION, id);
   hp_json_string(out, (const unsigned char *)s->id, strlen(s->id));
   fprintf(out, ",\"observed_at\":\"%s\",\"source\":", utc);
   hp_json_string(out, (const unsigned char *)source, strlen(source));
@@ -398,12 +400,14 @@ static int report_end(struct hp_store *s, FILE *out, const char *filename) {
   snprintf(tmp, sizeof(tmp), ".%.64s.tmp", filename);
   int fd = fileno(out);
   if (ferror(out) || fputc('}', out) == EOF || fflush(out) || hp_sync(fd)) {
+    hp_dev_log("report write failed: %s\n", strerror(errno));
     fclose(out); explicit_bzero(s->report_buffer, sizeof(s->report_buffer));
     unlinkat(s->pending_fd, tmp, 0); return -1;
   }
   int close_failed = fclose(out);
   explicit_bzero(s->report_buffer, sizeof(s->report_buffer));
   if (close_failed || renameat2(s->pending_fd, tmp, s->pending_fd, filename, RENAME_NOREPLACE) || hp_sync(s->pending_fd)) {
+    hp_dev_log("report commit failed: %s\n", strerror(errno));
     unlinkat(s->pending_fd, tmp, 0); return -1;
   }
   return 0;
@@ -423,21 +427,11 @@ int hp_report_simple(struct hp_store *s, const char *source, const char *operati
   char filename[80];
   FILE *out = report_begin(s, source, operation, path, filename);
   if (!out) return -1;
-  const char *classification = "unknown";
-  if (content && (memmem(content, content_size, "Failed password", 15) ||
-                  memmem(content, content_size, "NT_STATUS_LOGON_FAILURE", 23) ||
-                  memmem(content, content_size, "NT_STATUS_WRONG_PASSWORD", 24) ||
-                  memmem(content, content_size, "NT_STATUS_NO_SUCH_USER", 22)))
-    classification = "authentication_failure";
-  else if (content && (memmem(content, content_size, "status [NT_STATUS_OK]", 21) ||
-                       memmem(content, content_size, "Accepted password", 17) ||
-                       memmem(content, content_size, "Accepted publickey", 18)))
-    classification = "authentication_success";
-  else if (content && memmem(content, content_size, "smbd_audit", 10))
-    classification = "samba_audit";
-  else if (!strcmp(operation, "heartbeat"))
-    classification = "heartbeat";
+  const char *classification = hp_classify(operation, content, content_size);
   fprintf(out, ",\"metadata\":{},\"analysis\":{\"classification\":\"%s\"}", classification);
+  struct hp_event event;
+  hp_event_from_log(&event, source, operation, content, content_size);
+  hp_event_write(out, &event);
   if (content) {
     fputs(",\"network_context\":", out);
     hp_write_network_context(out, content, content_size);
@@ -457,11 +451,26 @@ int hp_report_simple(struct hp_store *s, const char *source, const char *operati
   return report_end(s, out, filename);
 }
 
+int hp_report_scan(struct hp_store *s, const struct hp_scan_hit *hit) {
+  char filename[80];
+  FILE *out = report_begin(s, "network", "port_scan_detected", "", filename);
+  if (!out) return -1;
+  struct hp_event event;
+  hp_event_scan(&event, hit);
+  hp_event_write(out, &event);
+  fputs(",\"metadata\":{},\"analysis\":{\"classification\":\"port_scan\",\"actor\":null},"
+        "\"evidence\":[],\"content_changes\":null,\"complete\":true,\"error\":null", out);
+  return report_end(s, out, filename);
+}
+
 int hp_report_connection(struct hp_store *s, const char *local_ip, unsigned short local_port,
                           const char *peer_ip, unsigned short peer_port) {
   char filename[80];
   FILE *out = report_begin(s, "network", "tcp_connection_observed", "", filename);
   if (!out) return -1;
+  struct hp_event event;
+  hp_event_connection(&event, local_ip, local_port, peer_ip, peer_port);
+  hp_event_write(out, &event);
   fputs(",\"metadata\":{},\"analysis\":{\"classification\":\"tcp_connection\",\"actor\":null},"
         "\"evidence\":[],\"content_changes\":null,\"complete\":true,\"error\":null,\"connection\":{"
         "\"protocol\":\"tcp\",\"state\":\"ESTABLISHED\",\"direction\":\"inbound_listener_match\","
@@ -484,6 +493,9 @@ int hp_snapshot_rename(struct hp_store *s, const char *old_path, const char *new
     fputs("null,\"previous_path_base64\":", out);
     hp_json_base64(out, (const unsigned char *)old_path, strlen(old_path));
   }
+  struct hp_event event;
+  hp_event_file(&event, "rename");
+  hp_event_write(out, &event);
   fputs(",\"metadata\":{},\"analysis\":{\"classification\":\"rename\",\"actor\":null},\"evidence\":", out);
   write_evidence(out, s, new_path, old_path);
   fputs(",\"content_changes\":null,\"complete\":true,\"error\":null", out);
@@ -678,8 +690,11 @@ int hp_snapshot_event(struct hp_store *s, int root_fd, const char *root_path,
   if (have_old_obs) fprintf(out, "%u", (unsigned)old_obs.uid); else fputs("null", out);
   fprintf(out, ",\"new_uid\":%u,\"old_gid\":", (unsigned)new_obs.uid);
   if (have_old_obs) fprintf(out, "%u", (unsigned)old_obs.gid); else fputs("null", out);
-  fprintf(out, ",\"new_gid\":%u,\"mtime_sec\":%lld},", (unsigned)new_obs.gid, (long long)new_obs.mtime_sec);
-  fputs("\"analysis\":{\"classification\":\"file_change\",\"actor\":null},\"evidence\":", out);
+  fprintf(out, ",\"new_gid\":%u,\"mtime_sec\":%lld}", (unsigned)new_obs.gid, (long long)new_obs.mtime_sec);
+  struct hp_event event;
+  hp_event_file(&event, reported_operation);
+  hp_event_write(out, &event);
+  fputs(",\"analysis\":{\"classification\":\"file_change\",\"actor\":null},\"evidence\":", out);
   write_evidence(out, s, full, NULL);
   fputs(",\"content_changes\":{", out);
   fputs("\"old_sha256\":", out);

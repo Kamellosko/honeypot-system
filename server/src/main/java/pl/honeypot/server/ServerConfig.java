@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
+import pl.honeypot.server.alert.AlertConfig;
 
 // Server settings loaded from a .properties file.
 //
@@ -22,7 +23,8 @@ public record ServerConfig(
         String keystorePassword,
         Path dashboardDir,
         Set<String> confirmAccounts,
-        String breadcrumbMarker) {
+        String breadcrumbMarker,
+        AlertConfig alert) {
 
     public static ServerConfig load(Path file) throws IOException {
         Properties p = new Properties();
@@ -57,6 +59,7 @@ public record ServerConfig(
                 p.getProperty("server.keystore.password", ""),
                 Path.of(p.getProperty("dashboard.dir", "../dashboard")),
                 confirmAccounts,
-                marker);
+                marker,
+                AlertConfig.from(p));
     }
 }

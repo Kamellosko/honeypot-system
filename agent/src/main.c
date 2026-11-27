@@ -170,15 +170,18 @@ int hp_run(const char *id, const char *ip, unsigned short port) {
 int main(int argc, char **argv) {
   struct hp_options options;
   if (hp_parse_args(argc, argv, &options)) {
-    fprintf(stderr, "usage: sys-auditd [--id AGENT_ID] [--ip DESTINATION_IP] [--port PORT]\n");
+    fprintf(stderr, "usage: sys-auditd [--id AGENT_ID] [--ip DESTINATION_IP] [--port PORT] [--dev]\n");
     return 2;
   }
   umask(0077);
-  if (!freopen("/dev/null", "w", stdout) || !freopen("/dev/null", "w", stderr)) return 1;
+  hp_dev = options.dev;
+  if (!hp_dev && (!freopen("/dev/null", "w", stdout) || !freopen("/dev/null", "w", stderr))) return 1;
   if (prctl(PR_SET_NAME, "sys-auditd", 0, 0, 0)) return 1;
-  size_t available = strlen(argv[0]);
-  memset(argv[0], 0, available);
-  memcpy(argv[0], "sys-auditd", available < 10 ? available : 10);
+  if (!hp_dev) {
+    size_t available = strlen(argv[0]);
+    memset(argv[0], 0, available);
+    memcpy(argv[0], "sys-auditd", available < 10 ? available : 10);
+  }
   struct sigaction action = { .sa_handler = stop_signal };
   if (sigemptyset(&action.sa_mask) || sigaction(SIGINT, &action, NULL) ||
       sigaction(SIGTERM, &action, NULL)) return 1;

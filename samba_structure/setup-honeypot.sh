@@ -227,6 +227,31 @@ Match User $HP_ADMIN_USER
 EOF
 sshd -t && systemctl reload sshd 2>/dev/null || systemctl restart sshd 2>/dev/null || true
 
+echo ">> [4b] hook PAM: haslo z nieudanych prob SSH -> syslog (agent: auth.attempt)"
+HP_PAM_SRC="$HERE/../scripts/hp-pam-log"
+if [ -f "$HP_PAM_SRC" ]; then
+  install -d -m 0755 /usr/local/libexec
+  install -m 0755 -o root -g root "$HP_PAM_SRC" /usr/local/libexec/hp-pam-log
+  command -v restorecon >/dev/null 2>&1 && restorecon /usr/local/libexec/hp-pam-log || true
+else
+  echo "   (brak $HP_PAM_SRC — pomijam hook PAM)"
+fi
+# Wpiecie w stos PAM jest NIEZWERYFIKOWANE na AlmaLinux i moze zablokowac logowanie SSH, dlatego jest wylaczone,
+# dopoki nie ustawisz HP_PAM_HOOK=yes w honeypot.conf. Najpierw wykonaj sonde: docs/superpowers/plans/sonda-akceptacyjna-etap2.md
+# (trzymaj druga sesje root otwarta). Hook ma sie uruchamiac TYLKO po nieudanym pam_unix: haslo udanego logowania
+# nigdy nie moze trafic do logu. Przywrocenie: cp /etc/pam.d/sshd.hp-orig /etc/pam.d/sshd
+if [ "${HP_PAM_HOOK:-no}" = "yes" ] && [ -x /usr/local/libexec/hp-pam-log ]; then
+  # hp-pam-wire: kopia z biezacego pliku, weryfikacja przed zapisem, idempotentne (testy: scripts/tests/pam_wire_test.sh).
+  # UWAGA: zastepuje podstawke password-auth wlasnym blokiem (znikaja pam_sss/pam_faildelay/pam_faillock) — patrz sonde B9.
+  if "$HERE/../scripts/hp-pam-wire" /etc/pam.d/sshd; then
+    echo "   wykonaj sonde akceptacyjna PRZED zamknieciem sesji root"
+  else
+    echo "   UWAGA: hook PAM NIE wpiety (kod $?), PAM bez zmian" >&2
+  fi
+else
+  echo "   hook PAM zainstalowany, ale NIE wpiety (HP_PAM_HOOK != yes)"
+fi
+
 echo ">> [7] Historia logowań (tylko UDANE; agent wstrzymany na czas zasiewania)"
 AGENT_WAS_ACTIVE=no
 if systemctl is-active --quiet sys-auditd 2>/dev/null; then AGENT_WAS_ACTIVE=yes; systemctl stop sys-auditd; fi
@@ -280,6 +305,8 @@ if command -v firewall-cmd >/dev/null 2>&1; then
   for s in $(firewall-cmd --permanent --zone="$ZONE" --list-services); do
     case "$s" in ssh|samba|dhcpv6-client) ;; *) firewall-cmd --permanent --zone="$ZONE" --remove-service="$s" >/dev/null ;; esac
   done
+  # logowanie odrzuconych pakietow do dziennika jadra (/var/log/messages): agent liczy z nich skany portow (net.scan)
+  firewall-cmd --set-log-denied=all >/dev/null
   firewall-cmd --reload >/dev/null
 fi
 

@@ -4,6 +4,14 @@ Stan na 2026-10-23, na podstawie kodu w repozytorium (agent C, serwer Java, dash
 Wszystko poniżej wynika z czytania kodu; tam, gdzie nie sprawdziłem tego na żywej maszynie, jest to
 oznaczone jako **[do weryfikacji]**. Lista luk i ryzyk jest w rozdziale 13.
 
+> **Co jest aktualne, a co historyczne**
+> - Rozdziały 3–9 (agent) i 10–11 (serwer, dashboard) opisują kod i nadal się zgadzają.
+> - Rozdział 2 opisuje **starszą personę `fs01`** (`scripts/setup-samba-honeypot.sh`). Obowiązująca persona „Dział Finansów"
+>   (`samba_structure/`, z `full_audit` i okruszkiem `backup_srv`) jest opisana w [`WDROZENIE-OD-ZERA.md`](WDROZENIE-OD-ZERA.md)
+>   i [`../samba_structure/ustalenia-konfiguracja.md`](../samba_structure/ustalenia-konfiguracja.md).
+> - Rozdział 13 (luki) jest z 2026-10-23, naprawione punkty są w nim oznaczone.
+> - Wykrywanie atakujących (`/api/attackers`) powstało później: [`../server/docs/attacker-detection.md`](../server/docs/attacker-detection.md).
+
 ---
 
 ## 1. Obraz całości
@@ -27,7 +35,7 @@ zamienia w raport JSON, zapisuje go trwale na dysku, a potem wysyła HTTPS-em do
                         │                                   │ 127.0.0.1:8443         │
                         │ sysmon-collector (Java, user sysmon)◄┘                     │
                         │   ├─ dedup po report_id ─► /var/lib/sysmon/events.jsonl    │
-                        │   └─ /api/{agents,events,stats} + dashboard (statyczny) │
+                        │   └─ /api/{agents,events,stats,attackers} + dashboard    │
                         └────────────────────────────────────────────────────────────┘
         dashboard: tylko przez tunel SSH (ssh -L 8443:127.0.0.1:8443)
         kopia dowodów poza maszynę: sync-events.sh (rsync po SSH, cron)
@@ -42,14 +50,17 @@ maszyny — to jedyna kopia poza H.
 ### Podział odpowiedzialności
 | Warstwa | Co robi | Czego **nie** robi |
 |---|---|---|
-| Samba (`setup-samba-honeypot.sh`) | Wabik: udziały, konta, pliki, logi uwierzytelniania | Nie ma audytu operacji na plikach (brak `vfs_full_audit`) |
+| Samba (`setup-samba-honeypot.sh`; w wariancie „Dział Finansów” `samba_structure/`) | Wabik: udziały, konta, pliki, logi uwierzytelniania | Wariant `fs01` nie ma audytu plików; wariant „Dział Finansów” ma `full_audit` |
 | Agent (C) | Wykrywa zdarzenia, robi migawki i diffy, kolejkuje i wysyła | Nie ocenia, kto jest atakującym (`actor` zawsze `null`) |
-| Serwer (Java) | Waliduje, deduplikuje, dopisuje do logu, udostępnia API | Nie koreluje zdarzeń, nie uwierzytelnia agentów |
-| Dashboard (JS) | Odświeża co 4 s, koloruje, pokazuje surowy JSON | Nie koreluje, nie alarmuje |
+| Serwer (Java) | Waliduje, deduplikuje, dopisuje do logu, udostępnia API, stopniuje atakujących (`/api/attackers`) | Nie uwierzytelnia agentów ani klientów API |
+| Dashboard (JS) | Odświeża co 4 s, koloruje, pokazuje surowy JSON | Nie alarmuje |
 
 ---
 
 ## 2. Maszyna-wabik (co widzi atakujący)
+
+> Ten rozdział opisuje starszy wariant `fs01`. Wariant „Dział Finansów” (hostname `fs-finanse`, udziały `Wspolny`, `Finanse`,
+> `Archiwum$`, `Zarzad`, `full_audit`, konto-przynęta `backup_srv`) jest w `samba_structure/ustalenia-konfiguracja.md`.
 
 Źródło: `scripts/setup-samba-honeypot.sh`, `scripts/setup-persona.sh`.
 
@@ -232,12 +243,19 @@ Raport trafia na dysk **przed** aktualizacją stanu referencyjnego. Awaria międ
 
 | Podciąg w linii | `analysis.classification` |
 |---|---|
-| `Failed password` (sshd, `/var/log/secure`) **lub** `NT_STATUS_LOGON_FAILURE` (Samba) | `authentication_failure` |
-| `smbd_audit:` (syslog z `vfs_full_audit`) | `samba_audit` |
-| cokolwiek innego | `unknown` |
+| Podciąg w linii | `analysis.classification` | `event.type` (serwis) |
+|---|---|---|
+| `Failed password` (sshd) **lub** `NT_STATUS_LOGON_FAILURE` / `WRONG_PASSWORD` / `NO_SUCH_USER` (Samba) | `authentication_failure` | `auth.failure` (`ssh` / `smb`) |
+| `Accepted password` / `Accepted publickey` / `status [NT_STATUS_OK]` | `authentication_success` | `auth.success` |
+| `NT_STATUS_ACCESS_DENIED` (Samba, poza `full_audit`) | `access_denied` | `auth.denied` (`smb`) |
+| `Invalid user <nazwa> from <IP>` (sshd) | `invalid_user` | `auth.invalid_user` (`ssh`) |
+| `Did not receive identification string`, `banner exchange:`, `kex_exchange_identification:` (sshd) | `service_probe` | `net.probe` (`ssh`), np. `nmap -sV` |
+| `smbd_audit:` (syslog z `vfs_full_audit`) | `samba_audit` | `samba.audit` |
+| cokolwiek innego | `unknown` | `log.entry` |
 
-Nie ma reguł typu „5 błędów w minutę", nie ma progów ani korelacji — każda linia jest osobnym zdarzeniem,
-a ocena wolumenu i wzorców to praca analityka na dashboardzie.
+Agent nie ma progów ani korelacji: każda linia jest osobnym zdarzeniem. Wyjątkiem są skany portów (`net.scan`, agregowane w agencie
+z logu zapory). Stopniowanie wolumenu i wzorców (brute force, skaner, przynęta) robi serwer, a alarm e-mail wysyła przy wejściu IP na wyższy poziom
+(rozdz. 10).
 
 ### 6.2 Kontekst sieciowy z linii (`network_context`)
 `hp_extract_ips` dzieli linię na tokeny złożone z `[A-Za-z0-9.:_%-]` i próbuje każdy sparsować jako IPv4, IPv6
@@ -333,7 +351,14 @@ Skutki: awaria serwera nie gubi danych (kolejka rośnie do 10 000); dostawa to *
   `FileChannel.force` **przed** odpowiedzią 2xx. Po awarii przy starcie obcinany jest niedokończony ostatni wiersz.
   Zapis jest pierwszy, dopiero potem raport trafia do zbioru „widziane" — nieudany zapis nie zamieni ponowienia w „duplikat".
 - **Liczniki w pamięci** (`ReportStore`): stan agentów (first/last seen, ostatnie source/operation/classification, liczba raportów),
-  zliczenia `by_source`, `by_operation`, `by_classification`. „online" = ostatni raport < 90 s temu **wg czasu serwera** (`received_at`).
+  zliczenia `by_source`, `by_operation`, `by_classification`, `by_event_type`, `by_event_kind` (typ i serwis, np. `auth.failure/ssh`).
+  „online" = ostatni raport < 90 s temu **wg czasu serwera** (`received_at`).
+- **Ocena atakujących** (`/api/attackers`): `confirmed` (udane logowanie na konto-przynętę) > `bait` (próba na konto-przynętę albo odczyt
+  okruszka) > `brute_force` (5+ nieudanych logowań w 10 min) > `fast_enum` (skan albo 3+ porty w minutę) > `suspicious` (pojedyncze nieudane
+  logowanie, sonda usługi, nieistniejące konto) > `contact`. Szczegóły: `DOKUMENTACJA-TECHNICZNA.md`, rozdz. 7.
+- **Alarmy e-mail** (`alert.enabled=true`): jeden mail, gdy IP wejdzie na `fast_enum`, `brute_force`, `bait` lub `confirmed` wyżej niż ostatnio
+  zgłoszony; limit 60 na godzinę, wysyłka w osobnym wątku, bez haseł w treści, bez maili za historię wczytaną przy starcie.
+  Konfiguracja: `WDROZENIE-OD-ZERA.md`, rozdz. 10a.
 - **API odczytu** (bez uwierzytelniania): `GET /api/agents`, `GET /api/events?agent_id=&source=&limit=` (od najnowszych
   wg kolejności zapisu), `GET /api/stats`, `GET /api/attackers` (wykryci atakujący, stopniowani po zachowaniu,
   patrz `server/docs/attacker-detection.md`). Dashboard jest serwowany z tego samego origin (`dashboard.dir`).
@@ -343,11 +368,13 @@ Skutki: awaria serwera nie gubi danych (kolejka rośnie do 10 000); dostawa to *
 ## 11. Dashboard
 
 Źródło: `dashboard/app.js`.
-- Co 4 s (przełącznik „auto") pobiera równolegle `stats`, `agents`, `events`; nie nakłada żądań (flaga `busy`), timeout 3 s.
+- Co 4 s (przełącznik „auto") pobiera równolegle `stats`, `agents`, `events`, `attackers`; nie nakłada żądań (flaga `busy`), timeout 3 s.
 - Karty agentów (ONLINE/OFFLINE, ostatni raport, liczba raportów), tabela zdarzeń z filtrami (źródło, agent, limit),
   kliknięcie wiersza otwiera panel z **pełnym surowym JSON-em** raportu.
-- Kolorowanie wg `classification`: czerwone — `authentication_failure`, `file_change`, `rename`, …; żółte — `tcp_connection`,
-  `samba_audit`; reszta neutralna. Kolumna „stan": ✓ lub ✗ z powodem z `error`.
+- Panel „atakujący": IP, ocena jako znaczek (POTWIERDZONY, PRZYNĘTA, BRUTE FORCE, SKANER, PODEJRZANY), nieudane logowania, sygnały.
+  Ten sam znaczek stoi przy IP w dzienniku; kliknięcie IP filtruje dziennik do tego adresu.
+- Etykiety zdarzeń z `event.type` i `event.service` („SSH · nieudane logowanie", „SMB · odmowa dostępu"); kolor wg typu zdarzenia
+  (raporty v1: wg `classification`). Kolumna „stan": ✓ lub ✗ z powodem z `error`.
 - Treści pochodzące od atakującego (nazwy plików, linie logów) przechodzą przez `esc()` — brak wstrzyknięcia HTML do panelu.
 - Połączenie z kolektorem: `https://127.0.0.1:8443/` przez tunel SSH.
 
@@ -390,7 +417,7 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
    (`from 192.168.1.5 port …`) i w `A.B.C.D:port`: 1 adres. Skutek: raporty `authentication_failure` z Samby mają puste `network_context`
    (nie ma IP ani MAC w samym raporcie). IP trzeba dopasować ręcznie po czasie z raportem `tcp_connection_observed`.
    Test jednostkowy (`network_test.c`) tego formatu nie obejmuje. Format linii podałem z pamięci o Sambie **[do weryfikacji na żywym logu z H]**.
-2. **Brak audytu operacji na plikach w Sambie.** `smb.conf` z naszego skryptu nie ma `vfs objects = full_audit`, a poziom logów `1 auth:3 auth_audit:3`
+2. **Brak audytu operacji na plikach w Sambie** *(dotyczy wariantu `fs01`; w wariancie „Dział Finansów” `full_audit` jest włączony, a agent klasyfikuje linie `smbd_audit[PID]:` jako `samba_audit`)*. `smb.conf` z naszego skryptu nie ma `vfs objects = full_audit`, a poziom logów `1 auth:3 auth_audit:3`
    nie loguje otwarć ani nazw plików. Skutki: (a) `evidence[]` przy zmianach plików będzie puste (szuka nazwy pliku w ostatnich 60 s logów);
    (b) klasyfikacja `samba_audit` nigdy się nie włączy; (c) odczyt/pobranie pliku (wykradanie `hasla_stare.csv`) w ogóle nie zostawia śladu —
    agent nie obserwuje `IN_OPEN`/`IN_ACCESS`, a Samba tego nie loguje. Agent jest już gotowy na `smbd_audit:` w syslogu
@@ -406,14 +433,14 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
 6. **Serwer bez uwierzytelniania**: każdy, kto dotrze do `127.0.0.1:8443` (czyli atakujący z shellem na H), może wstrzyknąć fałszywe raporty
    i czytać wszystko przez API (raporty zawierają treść plików i logów). Zewnętrznie chroni tylko bind na loopback i brak reguły w firewallu.
    Projekt (`projekt_honeypot.md` w tym katalogu) przewiduje token / mTLS, ale nie jest to zaimplementowane.
-7. **Skalowanie serwera**: każde zapytanie `GET /api/events` czyta i parsuje **cały** `events.jsonl`; dashboard robi to co 4 s.
-   Przy dużym ruchu logów (jedna linia = jeden raport) plik szybko rośnie. Zbiór `report_id` też rośnie w pamięci bez limitu.
+7. **Skalowanie serwera**: `GET /api/events` czyta plik od końca (naprawione), ale `events.jsonl` rośnie bez rotacji (jedna linia logu = jeden raport),
+   a zbiór `report_id` rośnie w pamięci bez limitu.
 8. **Walidacja ID**: agent dopuszcza `--id` do 64 znaków ASCII drukowalnych, serwer tylko `[A-Za-z0-9._-]{1,64}`. ID z innymi znakami → 400 → wszystkie raporty
    lądują jako `.rejected` (od tej wersji nie liczą się już do limitu kolejki). Domyślne `fs01`/`alma10-01` są poprawne.
 9. **Wydajność wysyłki**: nowy handshake TLS na każdy raport, kolejność `readdir`. Przy zalewie linii logu kolejka może narastać do limitu 10 000.
    Dodatkowo `hp_store_pending_count` liczy pliki zawierające `.json` w nazwie — także `*.json.rejected` i pliki tymczasowe — a `.rejected`
    nigdy nie są czyszczone, więc potrafią w końcu zająć limit kolejki.
-10. **Nieobecność wykrywania wzorców**: żadnej korelacji ani progów (np. N prób logowania z jednego IP) — klasyfikacja jest tylko podciągowa.
+10. **Nieobecność wykrywania wzorców** *(częściowo rozwiązane)*: agent nadal klasyfikuje tylko po podciągach, ale serwer stopniuje IP w `/api/attackers` (progi, okruszek). Zdarzeń z plików z logowaniami nadal nie koreluje.
 
 ### 13.3 Niskie / porządkowe
 11. Dashboard koloruje klasyfikacje `observation_gap`, `delete`, `downtime_change`, ale agent emituje je jako **operacje**, a klasyfikacja bywa `unknown` —
@@ -448,6 +475,8 @@ Posortowane wg wpływu na to, co system ma dostarczyć (dowody + kto/kiedy).
 | Próg „online" na serwerze | 90 s | `ReportStore.java` |
 | Maks. żądanie na serwerze | 32 MiB | `Main.java` |
 | Odświeżanie dashboardu | 4 s | `app.js` |
+| Brute force / skaner | 5 nieudanych w 10 min / 3 porty w 60 s | `ReportStore.java` |
+| Alarmy e-mail | 60 na godzinę, kolejka 100, ponowienia 30 s / 2 min / 10 min | `AlertService.java`, `alert.max_per_hour` |
 
 ## 15. Jak to sprawdzić na maszynie H
 

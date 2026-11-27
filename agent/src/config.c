@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "config.h"
+#include <stdarg.h>
 #include "io.h"
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -60,24 +61,40 @@ int hp_validate_args(const char *id, const char *ip, const char *port) {
   return errno || *end || n < 1 || n > 65535 ? -1 : 0;
 }
 
+int hp_dev;
+
+void hp_dev_log(const char *fmt, ...) {
+  if (!hp_dev) return;
+  va_list args;
+  va_start(args, fmt);
+  vfprintf(stderr, fmt, args);
+  va_end(args);
+}
+
 int hp_parse_args(int argc, char *const argv[], struct hp_options *options) {
   const char *id = AGENT_ID, *ip = DEST_IP, *port;
   char default_port[32];
   unsigned seen = 0;
+  int dev = 0;
   snprintf(default_port, sizeof(default_port), "%lld", (long long)DEST_PORT);
   port = default_port;
-  if (argc < 1 || !(argc & 1)) return -1;
-  for (int i = 1; i < argc; i += 2) {
+  if (argc < 1) return -1;
+  for (int i = 1; i < argc;) {
     unsigned flag;
-    if (!strcmp(argv[i], "--id")) { flag = 1; id = argv[i + 1]; }
-    else if (!strcmp(argv[i], "--ip")) { flag = 2; ip = argv[i + 1]; }
-    else if (!strcmp(argv[i], "--port")) { flag = 4; port = argv[i + 1]; }
-    else return -1;
+    if (!strcmp(argv[i], "--dev")) { flag = 8; dev = 1; i++; }
+    else {
+      if (i + 1 >= argc) return -1;
+      if (!strcmp(argv[i], "--id")) { flag = 1; id = argv[i + 1]; }
+      else if (!strcmp(argv[i], "--ip")) { flag = 2; ip = argv[i + 1]; }
+      else if (!strcmp(argv[i], "--port")) { flag = 4; port = argv[i + 1]; }
+      else return -1;
+      i += 2;
+    }
     if (seen & flag) return -1;
     seen |= flag;
   }
   if (hp_validate_args(id, ip, port)) return -1;
-  *options = (struct hp_options){ id, ip, (unsigned short)strtoul(port, NULL, 10) };
+  *options = (struct hp_options){ id, ip, (unsigned short)strtoul(port, NULL, 10), dev };
   return 0;
 }
 

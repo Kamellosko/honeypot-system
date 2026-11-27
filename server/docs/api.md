@@ -20,7 +20,7 @@ Wspólna koperta:
 
 | Pole | Typ | Opis |
 |------|-----|------|
-| `schema_version` | int | zawsze `1` |
+| `schema_version` | int | `1` (stary agent) lub `2` (obecny); serwer przyjmuje oba |
 | `report_id` | string | 64 znaki hex (lowercase), unikalny; transmisja bywa ponawiana |
 | `agent_id` | string | `[A-Za-z0-9._-]`, 1–64 znaków |
 | `observed_at` | string | czas zdarzenia UTC, `YYYY-MM-DDTHH:MM:SSZ` |
@@ -30,6 +30,31 @@ Wspólna koperta:
 | `analysis` | object | `{ "classification": ..., "actor": null }` |
 | `complete` | bool | czy raport jest kompletny |
 | `error` | string \| null | przyczyna niekompletności |
+| `agent_version` | string | tylko v2: wersja agenta (plik `VERSION`) |
+| `event` | object | tylko v2: ustandaryzowany opis zdarzenia, patrz niżej |
+
+Blok `event` (v2; schemat: [`docs/schema/event-v2.schema.json`](../../docs/schema/event-v2.schema.json), pola zbliżone do ECS):
+
+| Pole | Opis |
+|------|------|
+| `category`, `type` | `[A-Za-z0-9_.-]{1,64}`, np. `authentication` / `authentication_failure` |
+| `severity` | `info` \| `low` \| `medium` \| `high` |
+| `outcome` | `success` \| `failure` \| `unknown` |
+| `service`, `action` | string lub `null` |
+| `src`, `dst` | `{ip, port, mac}`; `mac` jest zawsze `null` (etap 1) |
+| `user` | `null` albo `{ "name": ... }` |
+| `credential` | `null` albo `{ "password": tekst\|null, "password_base64": tekst }` (0.3.0, tylko `auth.attempt`; hasło nie-UTF-8 idzie w `password_base64`, `password` jest wtedy `null`; limit 1024 znaków) |
+| `detail` | `null` albo `{ "ports": int>=1, "scan": nazwa, "window_seconds": int>=1 }` (0.3.0, tylko `net.scan`) |
+
+**Typy dodane w 0.3.0 (etap 2).** `auth.attempt` (`authentication`, `medium`, `failure`, `service: ssh`): próbowane hasło SSH
+z hooka PAM; zawsze towarzyszy mu zwykłe `auth.failure` z logu `sshd` (dwa niezależne źródła, serwer nie liczy prób
+podwójnie). `net.scan` (`network`, `medium`, `unknown`, `src.ip` ustawione, `dst.port` `null`): agent zgłasza skan, gdy jedno
+źródło dotknie co najmniej 10 różnych zamkniętych portów w 10 s (rodzaj w `detail.scan`: `syn`, `null`, `xmas`, `fin`, `other`).
+Serwer oznacza takie źródło w `/api/attackers` jako `fast_enum` (flaga trwała, nie okienkowa).
+**Hasła są zapisywane jawnie** (`credential.password`, a także w surowej treści logu); zabezpiecz magazyn tak jak raporty z treścią plików.
+
+Stare pola (`analysis.classification` itd.) zostają obok `event`. Serwer waliduje `event` w raportach v2 (zły blok → `400`)
+i liczy zdarzenia po `event.type` (`by_event_type` w `/api/stats`).
 
 Pola zależne od typu: `metadata`, `content_changes`, `evidence[]`, `connection{}`,
 `previous_path`, `content` / `content_base64`, `network_context`. Przykłady: `examples/report-*.json`.
@@ -91,6 +116,10 @@ Zdalne IP z połączeń TCP i nieudanych logowań, stopniowane po zachowaniu: `c
 Pola: `ip`, `mac`, `threat`, `first_seen`, `last_seen`, `connections`, `auth_failures`, `events`,
 `failures_10m`, `events_1m`, `distinct_ports`, `confirmed`, `breadcrumb_read`, `last_operation`.
 Szczegóły i progi: [`attacker-detection.md`](attacker-detection.md).
+
+## 6. Wersja (GET /api/version)
+
+`{"server_version": "...", "schema_versions": [1, 2]}`: wersja serwera i wersje schematu, które przyjmuje.
 
 ## Uwagi
 

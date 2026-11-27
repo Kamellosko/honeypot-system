@@ -1,0 +1,30 @@
+#!/bin/sh
+# Wpina hook hp-pam-log w plik PAM sshd (domyslnie podaj /etc/pam.d/sshd).
+#   hp-pam-wire PLIK    kody: 0 wpiete albo juz wpiete, 1 brak dokladnie jednej linii "auth substack password-auth",
+#                       2 blad kopii/weryfikacji (plik bez zmian)
+# Hook uruchamia sie TYLKO po nieudanym pam_unix: success=2 pomija pam_exec i pam_deny, wiec haslo udanego logowania
+# nigdy nie trafia do logu. UWAGA (niezweryfikowane na Almie): linia "substack password-auth" jest zastepowana wlasnym
+# blokiem, wiec znikaja inne moduly tej podstawki (pam_sss, pam_faildelay, pam_env, ewentualnie pam_faillock).
+# Konta spoza /etc/passwd (SSSD) przestaja sie logowac, a opoznienie po blednym hasle zanika.
+# Przywrocenie: cp PLIK.hp-orig PLIK
+set -u
+F=${1:?usage: hp-pam-wire PLIK}
+[ -f "$F" ] || { echo "brak pliku: $F" >&2; exit 2; }
+if grep -q 'hp-pam-hook' "$F"; then echo "hook PAM juz wpiety"; exit 0; fi
+NEW="$F.hp-new"
+# kopia zawsze z BIEZACEGO, niewpietego pliku (stara kopia mogla zostac po aktualizacji pakietu lub recznej edycji)
+cp -a "$F" "$F.hp-orig" || exit 2
+awk '
+  /^auth[ \t]+substack[ \t]+password-auth[ \t]*$/ {
+    print "# hp-pam-hook: haslo zapisywane tylko po nieudanym pam_unix (niezweryfikowane)"
+    print "auth       [success=2 default=ignore]  pam_unix.so nullok try_first_pass"
+    print "auth       optional                    pam_exec.so expose_authtok quiet seteuid /usr/local/libexec/hp-pam-log"
+    print "auth       requisite                   pam_deny.so"
+    n++; next }
+  { print }
+  END { exit n != 1 }' "$F" > "$NEW" || { rm -f "$NEW"; echo "w $F nie ma dokladnie jednej linii 'auth substack password-auth': PAM bez zmian" >&2; exit 1; }
+# weryfikacja przed zapisem: jedna linia zastapiona czterema; zapis nieatomowy nie moze zostawic ucietego pliku
+[ "$(wc -l < "$NEW")" -eq "$(( $(wc -l < "$F") + 3 ))" ] || { rm -f "$NEW"; echo "weryfikacja nowego pliku nie powiodla sie" >&2; exit 2; }
+cat "$NEW" > "$F" || { cat "$F.hp-orig" > "$F"; rm -f "$NEW"; echo "zapis nie powiodl sie, przywrocono kopie" >&2; exit 2; }  # cat zachowuje inode i kontekst SELinux
+rm -f "$NEW"
+echo "hook PAM wpiety (kopia: $F.hp-orig)"

@@ -106,16 +106,24 @@ Reszta raportu (diffy, logi, połączenia) jest zapisywana bez interpretacji.
 |---|---|
 | `/agents` | stan agentów: pierwszy i ostatni raport, liczba raportów. **Online** = raport nie starszy niż 90 s |
 | `/events?agent_id=&source=&limit=` | zdarzenia, od najnowszych |
-| `/stats` | liczniki po `source`, `operation` i `classification` |
-| `/attackers` | wykryci atakujący (IP), stopniowani: `contact`, `suspicious`, `fast_enum`, `brute_force`, `confirmed` |
+| `/stats` | liczniki po `source`, `operation`, `classification`, typie zdarzenia i typie z serwisem (np. `auth.failure/ssh`) |
+| `/attackers` | wykryci atakujący (IP), stopniowani: `contact`, `suspicious`, `fast_enum`, `brute_force`, `bait`, `confirmed` |
 
 Serwer serwuje też sam dashboard z katalogu `dashboard/`.
 
+### Alarmy e-mail
+
+Gdy adres IP wejdzie na poziom `fast_enum` (skaner), `brute_force`, `bait` (próba na konto-przynętę albo odczyt okruszka) lub `confirmed`,
+serwer wysyła jeden mail. Pojedyncze nieudane logowania nie wysyłają maila (to głównie szum z Windowsów). Limit 60 maili na godzinę,
+bez haseł w treści. Domyślnie wyłączone; w laboratorium poczta trafia do lokalnej skrzynki na hoście (`scripts/setup-mail-host.sh`,
+`WDROZENIE-OD-ZERA.md` rozdz. 10a).
+
 ### Dashboard (`dashboard/app.js`)
 
-Co 4 s pobiera `stats`, `agents` i `events`. Pokazuje karty agentów (ONLINE/OFFLINE), tabelę zdarzeń z filtrami
-i po kliknięciu pełny surowy JSON raportu. Kolory zależą od klasyfikacji: czerwony dla logowań i zmian plików,
-żółty dla połączeń. Dostęp tylko przez tunel SSH.
+Co 4 s pobiera `stats`, `agents`, `events` i `attackers`. Pokazuje karty agentów (ONLINE/OFFLINE), panel atakujących z oceną
+(POTWIERDZONY, PRZYNĘTA, BRUTE FORCE, SKANER, PODEJRZANY), tabelę zdarzeń z filtrami i po kliknięciu pełny surowy JSON raportu.
+Zdarzenia mają czytelne etykiety z typem i serwisem („SSH · nieudane logowanie", „SMB · odmowa dostępu"), a przy IP stoi znaczek oceny;
+kliknięcie IP filtruje dziennik. Dostęp tylko przez tunel SSH.
 
 ---
 

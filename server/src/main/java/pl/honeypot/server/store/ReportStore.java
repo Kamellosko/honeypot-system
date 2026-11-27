@@ -8,6 +8,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -64,12 +65,18 @@ public final class ReportStore {
         Instant lastSeen;
         long connections;
         long authFailures;
+        boolean scanned;   // agent reported a net.scan from this IP (not windowed)
         long events;
         final Deque<Instant> failTimes = new ArrayDeque<>();   // auth failures, pruned to FAIL_WINDOW
         final Deque<Instant> eventTimes = new ArrayDeque<>();  // any events, pruned to ENUM_WINDOW
         final Map<Integer, Instant> portTimes = new HashMap<>(); // distinct local ports, pruned to ENUM_WINDOW
         boolean confirmed;        // successful login to a decoy account
         boolean breadcrumbRead;   // read a file containing the breadcrumb marker
+        boolean probed;           // service probe without a valid banner (net.probe, e.g. nmap -sV)
+        long invalidUsers;        // logins to accounts that do not exist (auth.invalid_user)
+        boolean decoyAttempt;     // tried to log in to a decoy account (confirmAccounts), even with a wrong password
+        String alertedLevel;      // highest level already reported (mailed, or seen while replaying history)
+        final Deque<AlertNotice.Recent> recent = new ArrayDeque<>();   // newest first, at most RECENT_MAX
     }
 
     // Snapshot of an agent for GET /api/agents.
@@ -91,7 +98,11 @@ public final class ReportStore {
             @JsonProperty("online_agents") int onlineAgents,
             @JsonProperty("by_source") Map<String, Long> bySource,
             @JsonProperty("by_classification") Map<String, Long> byClassification,
-            @JsonProperty("by_operation") Map<String, Long> byOperation) {
+            @JsonProperty("by_operation") Map<String, Long> byOperation,
+            @JsonProperty("by_event_type") Map<String, Long> byEventType,
+            // "type/service" (e.g. "auth.failure/ssh"), or just the type when the event has no service.
+            @JsonProperty("by_event_kind") Map<String, Long> byEventKind,
+            @JsonProperty("unknown_event_types") long unknownEventTypes) {
     }
 
     // One attacker for GET /api/attackers.
@@ -109,15 +120,31 @@ public final class ReportStore {
             @JsonProperty("distinct_ports") int distinctPorts,
             @JsonProperty("confirmed") boolean confirmed,
             @JsonProperty("breadcrumb_read") boolean breadcrumbRead,
-            @JsonProperty("last_operation") String lastOperation) {
+            @JsonProperty("last_operation") String lastOperation,
+            @JsonProperty("probed") boolean probed,
+            @JsonProperty("invalid_users") long invalidUsers,
+            @JsonProperty("decoy_attempt") boolean decoyAttempt) {
     }
 
     // Successful SSH login line; a login to one of confirmAccounts means the attacker used the breadcrumb password.
     private static final Pattern SSH_ACCEPTED = Pattern.compile(
             "Accepted (?:password|publickey) for (\\S+) from (\\d{1,3}(?:\\.\\d{1,3}){3})");
 
+    // Event types the agent knows today (schema v2 catalog). Others are still stored, just counted separately.
+    public static final Set<String> KNOWN_EVENT_TYPES = Set.of("file.change", "net.connection", "auth.failure",
+            "auth.success", "samba.audit", "system.heartbeat", "system.source_unavailable",
+            "system.observation_gap", "log.entry", "system.unknown", "auth.attempt", "net.scan",
+            "auth.invalid_user", "auth.denied", "net.probe");
+
+    // Levels worth an e-mail; lower ones (suspicious, contact) are mostly noise on a local network.
+    public static final Set<String> ALERT_LEVELS = Set.of("fast_enum", "brute_force", "bait", "confirmed");
+    private static final Set<String> AUTH_TYPES = Set.of("auth.failure", "auth.invalid_user", "auth.attempt");
+    private static final int RECENT_MAX = 10;
+
     private final JsonlLog log;
     private final Object lock = new Object();
+    private volatile AlertSink alertSink;
+    private final Set<String> touched = new LinkedHashSet<>();   // attacker IPs changed by the current index(); under lock
     private final Set<String> confirmAccounts;
     private final String breadcrumbMarker;
 
@@ -126,6 +153,9 @@ public final class ReportStore {
     private final Map<String, Long> bySource = new ConcurrentHashMap<>();
     private final Map<String, Long> byClassification = new ConcurrentHashMap<>();
     private final Map<String, Long> byOperation = new ConcurrentHashMap<>();
+    private final Map<String, Long> byEventType = new ConcurrentHashMap<>();
+    private final Map<String, Long> byEventKind = new ConcurrentHashMap<>();
+    private volatile long unknownEventTypes;
     private final Map<String, AttackerState> attackers = new ConcurrentHashMap<>();
     private volatile long totalEvents;
 
@@ -144,7 +174,7 @@ public final class ReportStore {
                 if (reportId != null) {
                     seen.add(reportId);
                 }
-                index(n);
+                index(n, false);   // history: remember levels, never mail
             });
         }
     }
@@ -167,13 +197,20 @@ public final class ReportStore {
             if (reportId != null) {
                 seen.add(reportId);
             }
-            index(stamped);   // liveness uses the server's received_at, not the agent's
+            index(stamped, true);   // liveness uses the server's received_at, not the agent's
             return new InsertResult(stamped.get("event_id").asLong(), false, false);
         }
     }
 
+    // Sends escalations to sink from now on; null stops them. Reports already stored are never re-sent.
+    public void setAlertSink(AlertSink sink) {
+        this.alertSink = sink;
+    }
+
     // Updates liveness and counters for one accepted report. Caller holds lock.
-    private void index(JsonNode n) {
+    // notify=false while replaying history: levels are remembered as reported, nothing is sent.
+    private void index(JsonNode n, boolean notify) {
+        touched.clear();
         totalEvents++;
         bump(bySource, text(n, "source"));
         bump(byOperation, capKey(byOperation, text(n, "operation")));
@@ -181,9 +218,30 @@ public final class ReportStore {
         String classification = analysis != null ? text(analysis, "classification") : null;
         bump(byClassification, capKey(byClassification, classification));
 
+        JsonNode event = n.get("event");
+        String eventType = event != null ? text(event, "type") : null;
+        if (eventType != null) {
+            bump(byEventType, capKey(byEventType, eventType));
+            String service = text(event, "service");
+            String kind = service != null ? eventType + "/" + service : eventType;
+            bump(byEventKind, capKey(byEventKind, kind));
+            if (!KNOWN_EVENT_TYPES.contains(eventType)) {
+                unknownEventTypes++;
+            }
+        }
+
         Instant parsed = parse(text(n, "received_at"));
         final Instant at = parsed != null ? parsed : Instant.now();
         String operation = text(n, "operation");
+
+        // A port scan the agent already counted over its own window: mark the source, do not recount packets.
+        if ("net.scan".equals(eventType)) {
+            JsonNode src = event.get("src");
+            String ip = src != null ? text(src, "ip") : null;
+            if (ip != null) {
+                markScanner(ip, at);
+            }
+        }
 
         // Attacker from an observed inbound TCP connection (peer = the remote client).
         JsonNode conn = n.get("connection");
@@ -195,14 +253,43 @@ public final class ReportStore {
                 recordAttacker(text(peer, "ip"), text(peer, "mac"), at, false, port, operation);
             }
         }
-        // Attacker from a failed login (SSH and SMB both land here as authentication_failure).
+        // Probe or a guess at a non-existent account: suspicious, but not a failed password (that line comes separately).
+        if ("net.probe".equals(eventType) || "auth.invalid_user".equals(eventType)) {
+            JsonNode src = event.get("src");
+            String ip = src != null ? text(src, "ip") : null;
+            if (ip != null) {
+                flagSuspect(ip, at, operation, "net.probe".equals(eventType));
+            }
+        }
+
+        // Attacker from a failed login (SSH and SMB both land here as authentication_failure);
+        // a Samba access denial (auth.denied) counts the same.
         // Only the first address counts: the agent puts the real client ("remote host [..]" in Samba,
         // "from IP" in sshd) first, while later ones are this server ("local host [..]") or made-up
         // addresses the attacker typed into the user name.
-        if ("authentication_failure".equals(classification)) {
-            String ip = firstEndpoint(n);
+        if ("authentication_failure".equals(classification) || "auth.denied".equals(eventType)) {
+            // v2 reports carry the parsed source address; v1 falls back to the text-derived endpoint.
+            JsonNode src = event != null ? event.get("src") : null;
+            String ip = src != null ? text(src, "ip") : null;
+            if (ip == null) {
+                ip = firstEndpoint(n);
+            }
             if (ip != null) {
                 recordAttacker(ip, null, at, true, null, operation);
+            }
+        }
+
+        // A login attempt on a decoy account means the attacker already found the breadcrumb.
+        if (eventType != null && AUTH_TYPES.contains(eventType)) {   // Set.of rejects contains(null)
+            JsonNode user = event.get("user");
+            String name = user != null ? text(user, "name") : null;
+            JsonNode src = event.get("src");
+            String ip = src != null ? text(src, "ip") : null;
+            if (name != null && ip != null && confirmAccounts.contains(name)) {
+                AttackerState s = attacker(ip, at);
+                if (s != null) {
+                    s.decoyAttempt = true;
+                }
             }
         }
 
@@ -221,6 +308,8 @@ public final class ReportStore {
         }
 
         String agentId = text(n, "agent_id");
+        remember(event, at);
+        escalate(agentId, at, notify);
         if (agentId == null) {
             return;
         }
@@ -263,8 +352,52 @@ public final class ReportStore {
         if (s.firstSeen == null || at.isBefore(s.firstSeen)) {
             s.firstSeen = at;
         }
+        touched.add(ip);
         return s;
     }
+
+    // Adds the event to its source's recent list (only what the mail may show: no password, no raw text).
+    private void remember(JsonNode event, Instant at) {
+        JsonNode src = event != null ? event.get("src") : null;
+        String ip = src != null ? text(src, "ip") : null;
+        AttackerState s = ip != null && touched.contains(ip) ? attackers.get(ip) : null;
+        if (s == null) {
+            return;
+        }
+        JsonNode user = event.get("user");
+        JsonNode port = src.get("port");
+        s.recent.addFirst(new AlertNotice.Recent(iso(at), text(event, "type"), text(event, "service"),
+                user != null ? text(user, "name") : null,
+                port != null && port.canConvertToInt() ? port.asInt() : null));
+        while (s.recent.size() > RECENT_MAX) {
+            s.recent.removeLast();
+        }
+    }
+
+    // Reports every touched attacker whose level rose above the one already reported. Caller holds lock.
+    private void escalate(String agentId, Instant at, boolean notify) {
+        for (String ip : touched) {
+            AttackerState s = attackers.get(ip);
+            if (s == null) {
+                continue;
+            }
+            String level = threatOf(s, at);
+            if (!ALERT_LEVELS.contains(level) || rank(level) <= rank(s.alertedLevel)) {
+                continue;
+            }
+            s.alertedLevel = level;
+            AlertSink sink = alertSink;
+            if (notify && sink != null) {
+                sink.escalated(new AlertNotice(agentId, view(s, at), REASONS.get(level), List.copyOf(s.recent)));
+            }
+        }
+    }
+
+    private static final Map<String, String> REASONS = Map.of(
+            "fast_enum", "skan portów albo 3+ porty w minutę",
+            "brute_force", "5+ nieudanych logowań w 10 min",
+            "bait", "próba logowania na konto-przynętę albo odczyt pliku-przynęty",
+            "confirmed", "udane logowanie na konto-przynętę");
 
     // Records one attacker observation. Caller holds lock. Loopback is skipped so
     // the agent's own upload/tunnel traffic on 127.0.0.1 is not counted.
@@ -296,6 +429,38 @@ public final class ReportStore {
         }
     }
 
+    // Flags an IP the agent reported as a port scanner. Caller holds lock.
+    private void markScanner(String ip, Instant at) {
+        AttackerState s = attacker(ip, at);
+        if (s == null) {
+            return;
+        }
+        if (s.lastSeen == null || !at.isBefore(s.lastSeen)) {
+            s.lastSeen = at;
+        }
+        s.scanned = true;
+    }
+
+    // Flags an IP that probed a service or tried a non-existent account. Caller holds lock.
+    private void flagSuspect(String ip, Instant at, String op, boolean probe) {
+        AttackerState s = attacker(ip, at);
+        if (s == null) {
+            return;
+        }
+        if (s.lastSeen == null || !at.isBefore(s.lastSeen)) {
+            s.lastSeen = at;
+            s.lastOperation = op;
+        }
+        s.events++;
+        s.eventTimes.addLast(at);
+        pruneOlderThan(s.eventTimes, at.minus(ENUM_WINDOW));
+        if (probe) {
+            s.probed = true;
+        } else {
+            s.invalidUsers++;
+        }
+    }
+
     // Flags an IP from content signals (confirmed login, breadcrumb read). Caller holds lock.
     private void markAttacker(String ip, Instant at, boolean confirmed, boolean breadcrumb) {
         AttackerState s = attacker(ip, at);
@@ -319,17 +484,7 @@ public final class ReportStore {
         List<AttackerView> out = new ArrayList<>();
         synchronized (lock) {
             for (AttackerState s : attackers.values()) {
-                int fails = countSince(s.failTimes, now.minus(FAIL_WINDOW));
-                int evs = countSince(s.eventTimes, now.minus(ENUM_WINDOW));
-                Instant portCut = now.minus(ENUM_WINDOW);
-                int ports = (int) s.portTimes.values().stream().filter(t -> !t.isBefore(portCut)).count();
-                String threat = s.confirmed ? "confirmed"
-                        : fails >= FAIL_THRESHOLD ? "brute_force"
-                        : ports >= PORT_SCAN_THRESHOLD ? "fast_enum"
-                        : (s.authFailures > 0 || s.breadcrumbRead) ? "suspicious" : "contact";
-                out.add(new AttackerView(s.ip, s.mac, threat, iso(s.firstSeen), iso(s.lastSeen),
-                        s.connections, s.authFailures, s.events, fails, evs, ports,
-                        s.confirmed, s.breadcrumbRead, s.lastOperation));
+                out.add(view(s, now));
             }
         }
         out.sort((x, y) -> {
@@ -339,9 +494,36 @@ public final class ReportStore {
         return out;
     }
 
+    // Level of one attacker at a given moment (the windows are counted back from 'now'). Caller holds lock.
+    private static String threatOf(AttackerState s, Instant now) {
+        int fails = countSince(s.failTimes, now.minus(FAIL_WINDOW));
+        return s.confirmed ? "confirmed"
+                : (s.decoyAttempt || s.breadcrumbRead) ? "bait"
+                : fails >= FAIL_THRESHOLD ? "brute_force"
+                : (distinctPorts(s, now) >= PORT_SCAN_THRESHOLD || s.scanned) ? "fast_enum"
+                : (s.authFailures > 0 || s.probed || s.invalidUsers > 0) ? "suspicious"
+                : "contact";
+    }
+
+    private static int distinctPorts(AttackerState s, Instant now) {
+        Instant cut = now.minus(ENUM_WINDOW);
+        return (int) s.portTimes.values().stream().filter(t -> !t.isBefore(cut)).count();
+    }
+
+    private static AttackerView view(AttackerState s, Instant now) {
+        return new AttackerView(s.ip, s.mac, threatOf(s, now), iso(s.firstSeen), iso(s.lastSeen),
+                s.connections, s.authFailures, s.events, countSince(s.failTimes, now.minus(FAIL_WINDOW)),
+                countSince(s.eventTimes, now.minus(ENUM_WINDOW)), distinctPorts(s, now),
+                s.confirmed, s.breadcrumbRead, s.lastOperation, s.probed, s.invalidUsers, s.decoyAttempt);
+    }
+
     private static int rank(String threat) {
+        if (threat == null) {
+            return -1;
+        }
         return switch (threat) {
-            case "confirmed" -> 4;
+            case "confirmed" -> 5;
+            case "bait" -> 4;
             case "brute_force" -> 3;
             case "fast_enum" -> 2;
             case "suspicious" -> 1;
@@ -423,7 +605,10 @@ public final class ReportStore {
                 online,
                 new TreeMap<>(bySource),
                 new TreeMap<>(byClassification),
-                new TreeMap<>(byOperation));
+                new TreeMap<>(byOperation),
+                new TreeMap<>(byEventType),
+                new TreeMap<>(byEventKind),
+                unknownEventTypes);
     }
 
     // Past MAX_KEYS distinct keys, a new key is counted under "other". Caller holds lock.

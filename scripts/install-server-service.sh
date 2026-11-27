@@ -58,6 +58,9 @@ chmod -R u=rwX,go=rX /opt/sysmon/dashboard   # umask 077 zrobiłby go nieczyteln
 echo ">> Konfiguracja + keystore -> /etc/sysmon"
 install -d -o root -g root /etc/sysmon
 install -m 600 -o sysmon -g sysmon "$KEYSTORE" /etc/sysmon/collector.p12
+# Ustawienia alarmów (alert.*) wpisuje administrator ręcznie; aktualizacja nie może ich skasować.
+ALERT_LINES=""
+[ -f /etc/sysmon/collector.properties ] && ALERT_LINES="$(grep '^alert\.' /etc/sysmon/collector.properties || true)"
 install -m 640 -o root -g sysmon /dev/null /etc/sysmon/collector.properties
 tee /etc/sysmon/collector.properties >/dev/null <<EOF
 server.bind=127.0.0.1
@@ -67,6 +70,10 @@ server.keystore.password=$KEYSTORE_PASS
 data.dir=/var/lib/sysmon
 dashboard.dir=/opt/sysmon/dashboard
 EOF
+if [ -n "$ALERT_LINES" ]; then
+  printf '%s\n' "$ALERT_LINES" >> /etc/sysmon/collector.properties
+  echo "   zachowano ustawienia alarmów (alert.*)"
+fi
 chmod 640 /etc/sysmon/collector.properties
 chown root:sysmon /etc/sysmon/collector.properties
 

@@ -53,7 +53,12 @@ Program może wystartować bez argumentów. Domyślne wartości znajdują się w
 | `DEST_PORT` | `443` |
 | `HEARTBEAT_INTERVAL` | `60` sekund |
 
-Administrator może nadpisać identyfikator i cel przez `--id`, `--ip`, `--port`. Nie ma argumentu CLI zmieniającego katalog stanu ani monitorowane źródła.
+Administrator może nadpisać identyfikator i cel przez `--id`, `--ip`, `--port`. Dodatkowo `--dev` (bez wartości) zostawia stdout/stderr podłączone i wypisuje błędy zapisu oraz jedną linię na każdą próbę wysyłki (`send report_id=… http=… curl=…`); bez niego agent milczy i podszywa się pod `sys-auditd`. Nie ma argumentu CLI zmieniającego katalog stanu ani monitorowane źródła.
+
+Od 0.3.0 agent rozpoznaje dwa dodatkowe zdarzenia (szczegóły: `docs/DOKUMENTACJA-TECHNICZNA.md` 4.8a): `auth.attempt` z linii
+`hp-pam:` w `/var/log/secure` (hook `scripts/hp-pam-log`, instalator: `HP_PAM_HOOK=yes`) oraz `net.scan` z linii zapory w
+`/var/log/messages` (`firewall-cmd --set-log-denied=all`; próg 10 portów w 10 s to stałe w `include/scan.h`). Linie zapory nie są
+raportowane osobno. `make check` uruchamia też test hooka (`scripts/tests/pam_log_test.sh`).
 
 Przykład wartości kompilacyjnych — adres `192.0.2.10` jest przykładowy, zastąp go adresem własnego odbiornika:
 

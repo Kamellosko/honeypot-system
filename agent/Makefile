@@ -5,6 +5,8 @@ INSTALL_BINARY ?= build/release/honeypot
 .DELETE_ON_ERROR:
 CFLAGS ?= -O2 -g
 CFLAGS += -std=c11 -Wall -Wextra -Werror
+VERSION_STR := $(shell tr -d '\n' < ../VERSION)
+CPPFLAGS += -DHP_VERSION='"$(VERSION_STR)"'
 # GCC 11 (AlmaLinux 9) supports _FORTIFY_SOURCE up to 2 and -Werror turns level 3 into an error.
 # On a newer toolchain (AlmaLinux 10, gcc-toolset-14) build with FORTIFY_LEVEL=3.
 FORTIFY_LEVEL ?= 2
@@ -12,9 +14,9 @@ HARDEN_CFLAGS = -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=$(FORTIFY_LEVEL) -fstack-pro
 HARDEN_LDFLAGS = -pie -Wl,-z,relro,-z,now,-z,noexecstack -Wl,--build-id=sha1
 INCLUDES = -Iinclude -Ithird_party/cJSON
 LDLIBS += -lcurl -lcrypto -ltdb -lpthread -lm
-SOURCES = src/main.c src/config.c src/monitor.c src/snapshot.c src/protocol.c src/port.c src/heartbeat.c src/network.c src/arp.c src/connections.c src/diff.c src/io.c
+SOURCES = src/main.c src/event.c src/config.c src/monitor.c src/snapshot.c src/protocol.c src/port.c src/heartbeat.c src/network.c src/arp.c src/connections.c src/diff.c src/io.c src/scan.c
 TEST_COMMON = src/snapshot.c src/protocol.c
-TESTS = config snapshot binary monitor root_rebind rename_overwrite log protocol transport heartbeat network connections diff io
+TESTS = version scan monitor_scan event config snapshot binary monitor root_rebind rename_overwrite log protocol transport heartbeat network connections diff io
 
 .PHONY: all check clean install release check-release install-release
 all: build/honeypot
@@ -74,6 +76,8 @@ check: $(addprefix build/,$(addsuffix _test,$(TESTS))) build/honeypot build/http
 	@set -eu; for test in $(TESTS); do build/$${test}_test; done
 	@build/report_failure_test
 	@build/lifecycle_test
+	@sh ../scripts/tests/pam_log_test.sh
+	@sh ../scripts/tests/pam_wire_test.sh
 	@build/wipe_test
 	@build/connection_poll_test
 	@build/report_id_test
@@ -85,6 +89,8 @@ check: $(addprefix build/,$(addsuffix _test,$(TESTS))) build/honeypot build/http
 	@build/honeypot --id x --ip bad --port 443 >/dev/null 2>&1; test $$? -eq 2
 	@build/honeypot --id x --ip 127.0.0.1 --port 0 >/dev/null 2>&1; test $$? -eq 2
 	@build/honeypot --id x --ip 127.0.0.1 --port 443 --extra z >/dev/null 2>&1; test $$? -eq 2
+	@build/honeypot --dev --dev >/dev/null 2>&1; test $$? -eq 2
+	@build/honeypot --dev --ip >/dev/null 2>&1; test $$? -eq 2
 
 clean:
 	rm -rf build

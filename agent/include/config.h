@@ -1,6 +1,9 @@
 #pragma once
 #include <stddef.h>
 
+#ifndef HP_VERSION
+#define HP_VERSION "unknown"
+#endif
 #ifndef AGENT_ID
 #define AGENT_ID "alma10-01"
 #endif
@@ -21,7 +24,10 @@ struct hp_options {
   const char *id;
   const char *ip;
   unsigned short port;
+  int dev;
 };
+extern int hp_dev;
+void hp_dev_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 int hp_parse_args(int argc, char *const argv[], struct hp_options *options);
 
 enum hp_source_kind { HP_SHARE, HP_LOG, HP_SOURCE_STATUS };

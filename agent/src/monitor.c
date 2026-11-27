@@ -14,6 +14,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <time.h>
 
 #define WATCH_MASK (IN_CLOSE_WRITE | IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF)
 
@@ -94,7 +95,10 @@ int hp_monitor_init(struct hp_monitor *m, struct hp_store *store) {
   memset(m, 0, sizeof(*m));
   m->store = store;
   m->inotify_fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
-  return m->inotify_fd < 0 ? -1 : 0;
+  if (m->inotify_fd < 0) return -1;
+  m->scan = hp_scan_new(HP_SCAN_PORTS_DEFAULT, HP_SCAN_WINDOW_DEFAULT);
+  if (!m->scan) { close(m->inotify_fd); m->inotify_fd = -1; return -1; }
+  return 0;
 }
 
 int hp_monitor_add_share(struct hp_monitor *m, const char *name, const char *path) {
@@ -154,6 +158,12 @@ static int fingerprint_changed(int fd, const struct hp_log *log) {
                 memcmp(current, log->fingerprint, log->fingerprint_size) != 0;
   explicit_bzero(current, sizeof(current));
   return changed;
+}
+
+/* Tylko log o nazwie "messages" (na Almie /var/log/messages, gdzie trafia dziennik jadra) zasila tracker skanow. */
+static int is_messages_log(const char *path) {
+  const char *base = strrchr(path, '/');
+  return !strcmp(base ? base + 1 : path, "messages");
 }
 
 static int poll_logs(struct hp_monitor *m) {
@@ -221,8 +231,21 @@ static int poll_logs(struct hp_monitor *m) {
         remember_fingerprint(log, buffer + pos, length);
         log->partial_size += length; log->offset += (off_t)length; pos += length;
         if (newline || log->partial_size == 65536) {
-          if (hp_report_simple(m->store, "log", "append", log->path,
-                               newline ? NULL : "long_record_segment", log->partial, log->partial_size)) {
+          /* Linie zapory (firewalld --set-log-denied) trafiaja do trackera skanow zamiast do osobnych raportow. */
+          struct hp_scan_hit hit;
+          int fwl = newline && is_messages_log(log->path)
+                        ? hp_scan_feed(m->scan, log->partial, log->partial_size, time(NULL), &hit) : 0;
+          int report_failed;
+          if (fwl == 2) {
+            report_failed = hp_report_scan(m->store, &hit);
+            if (!report_failed) hp_scan_ack(m->scan, hit.src_ip);
+          } else if (fwl == 1) {
+            report_failed = 0;
+          } else {
+            report_failed = hp_report_simple(m->store, "log", "append", log->path,
+                                             newline ? NULL : "long_record_segment", log->partial, log->partial_size);
+          }
+          if (report_failed) {
             log->offset -= (off_t)log->partial_size;
             log->fingerprint_size = 0; /* rewound: rebuilt by the next read */
             explicit_bzero(log->partial, log->partial_size); log->partial_size = 0;
@@ -508,6 +531,7 @@ void hp_monitor_close(struct hp_monitor *m) {
     free(m->logs[i].partial);
   }
   free(m->logs);
+  hp_scan_free(m->scan);
   for (size_t i = 0; i < 128; i++) free(m->moves[i].relative);
   for (size_t i = 0; i < 128; i++) free(m->created[i].relative);
   explicit_bzero(m, sizeof(*m));

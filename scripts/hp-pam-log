@@ -1,0 +1,15 @@
+#!/bin/sh
+# Hook PAM (pam_exec.so expose_authtok): zapisuje probe hasla SSH do syslogu jako
+#   hp-pam: u=<base64 uzytkownik> h=<rhost> p=<base64 haslo>
+# Agent czyta te linie z /var/log/secure (zdarzenie auth.attempt). Wpiecie w stos PAM ma uruchamiac hook
+# WYLACZNIE po nieudanym sprawdzeniu hasla (patrz setup-honeypot.sh); hasla udanych logowan nie sa zapisywane.
+# Hook nie moze zmieniac wyniku logowania: zawsze kod 0, bez wyjscia.
+umask 077
+# Hasla czytamy jako strumien bajtow (bez zmiennych powloki): pam_exec moze dopisac bajt NUL, a haslo moze
+# zawierac spacje, cudzyslowy i znak nowej linii. Obciecie do 1024 bajtow.
+p=$(head -c 1024 2>/dev/null | tr -d '\000' | base64 -w0 2>/dev/null)
+u=$(printf '%s' "${PAM_USER-}" | base64 -w0 2>/dev/null)
+h=$(printf '%s' "${PAM_RHOST-}" | tr -d ' \t\r\n' 2>/dev/null)
+# Wiadomosc idzie na stdin loggera, nie w argv: argv jest czytelny dla kazdego lokalnego uzytkownika (/proc/<pid>/cmdline).
+printf '%s\n' "u=$u h=$h p=$p" | logger -p authpriv.info -t hp-pam >/dev/null 2>&1
+exit 0

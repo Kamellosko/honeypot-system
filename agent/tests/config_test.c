@@ -26,6 +26,27 @@ int main(void) {
   assert(hp_parse_args(2, partial, &options) != 0);
   char *unknown[] = { "agent", "--other", "x", NULL };
   assert(hp_parse_args(3, unknown, &options) != 0);
+  char *dev_only[] = { "agent", "--dev", NULL };
+  assert(hp_parse_args(2, dev_only, &options) == 0 && options.dev == 1);
+  char *dev_mixed[] = { "agent", "--id", "a", "--dev", "--port", "443", NULL };
+  assert(hp_parse_args(6, dev_mixed, &options) == 0 && options.dev == 1 && !strcmp(options.id, "a") && options.port == 443);
+  assert(hp_parse_args(3, partial, &options) == 0 && options.dev == 0);
+  char *dev_twice[] = { "agent", "--dev", "--dev", NULL };
+  assert(hp_parse_args(3, dev_twice, &options) != 0);
+  char *dev_missing[] = { "agent", "--dev", "--ip", NULL };
+  assert(hp_parse_args(3, dev_missing, &options) != 0);
+  {  // hp_dev_log is silent without --dev and writes to stderr with it
+    char tmp[] = "/tmp/hp-devlog-XXXXXX";
+    int fd = mkstemp(tmp), saved = dup(2);
+    assert(fd >= 0 && saved >= 0 && dup2(fd, 2) == 2);
+    hp_dev = 0; hp_dev_log("quiet %d\n", 1); fflush(stderr);
+    assert(lseek(fd, 0, SEEK_END) == 0);
+    hp_dev = 1; hp_dev_log("loud %d\n", 2); fflush(stderr);
+    char buf[64] = {0};
+    assert(pread(fd, buf, sizeof(buf) - 1, 0) > 0 && !strcmp(buf, "loud 2\n"));
+    assert(dup2(saved, 2) == 2);
+    close(saved); close(fd); unlink(tmp); hp_dev = 0;
+  }
   struct hp_sources sources = {0};
   assert(hp_validate_args("agent", "127.0.0.1", "443") == 0);
   assert(hp_validate_args("", "127.0.0.1", "443") != 0);
