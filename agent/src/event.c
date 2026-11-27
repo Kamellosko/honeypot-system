@@ -315,6 +315,11 @@ void hp_event_from_log(struct hp_event *e, const char *source, const char *opera
   } else if (strcmp(cls, "samba_audit")) {
     e->service = "ssh";
     parse_ssh(e, line, len);
+    /* Adres klienta sshd stoi po OSTATNIM " from ". Nazwe uzytkownika wpisuje atakujacy i moze wygladac jak IP
+       (np. "127.0.0.1"), wiec ogolne szukanie pierwszego adresu w linii podmienialoby zrodlo. Gdy adresu nie ma,
+       zostaje pusty zamiast zgadywania. */
+    parse_from(e, line, len);
+    return;
   }
   struct hp_network_context ctx;
   hp_extract_ips(line, len, &ctx);
