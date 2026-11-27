@@ -359,6 +359,7 @@ Skutki: awaria serwera nie gubi danych (kolejka rośnie do 10 000); dostawa to *
 - **Alarmy e-mail** (`alert.enabled=true`): jeden mail, gdy IP wejdzie na `fast_enum`, `brute_force`, `bait` lub `confirmed` wyżej niż ostatnio
   zgłoszony; po 30 minutach ciszy z danego IP poziom jest zgłaszany od nowa (ponowne uzbrojenie); limit 60 na godzinę, wysyłka w osobnym wątku, bez haseł w treści, bez maili za historię wczytaną przy starcie.
   Konfiguracja: `WDROZENIE-OD-ZERA.md`, rozdz. 10a.
+- **Grupowanie w liście zdarzeń** (dashboard): nieudane logowania z tego samego IP, z tym samym loginem i (gdy hook PAM zapisał hasło) tym samym hasłem są jednym wierszem z licznikiem `×N`; przerwa dłuższa niż 10 min zaczyna nowy wiersz. Dziennik `events.jsonl` zawiera nadal każde zdarzenie. Bez hooka PAM hasła nie ma w raportach, więc klucz to adres + login.
 - **API odczytu** (bez uwierzytelniania): `GET /api/agents`, `GET /api/events?agent_id=&source=&limit=` (od najnowszych
   wg kolejności zapisu), `GET /api/stats`, `GET /api/attackers` (wykryci atakujący, stopniowani po zachowaniu,
   patrz `server/docs/attacker-detection.md`). Dashboard jest serwowany z tego samego origin (`dashboard.dir`).
