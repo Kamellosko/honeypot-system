@@ -30,6 +30,60 @@ done
 as_user() { runuser -u "$BUILD_USER" -- env JAVA_HOME=/usr/lib/jvm/java-21-openjdk "$@"; }
 step() { echo; echo "=== $* ==="; }
 
+# --- uzupełnianie pustych pól honeypot.conf pytaniami (czyta z terminala, działa też przy "| tail") ---
+tty_ok() { [ -r /dev/tty ] || { echo "Puste pola w $CONF, a brak terminala do pytań: uzupełnij plik ręcznie." >&2; exit 1; }; }
+
+# Hasło z klawiatury; Enter = losowe. Bez " $ ` \ | (psułyby plik konfiguracyjny).
+ask_pass() {
+  local label=$1 p
+  while :; do
+    printf '%s (Enter = losowe): ' "$label" >/dev/tty; read -r p </dev/tty
+    [ -n "$p" ] || p="$2$(openssl rand -hex 3)!"
+    case "$p" in *[\"\$\`\\\|]*) echo "  bez znaków \" \$ \` \\ |" >/dev/tty ;; *) break ;; esac
+  done
+  echo "  -> $p" >/dev/tty
+  REPLY=$p
+}
+
+# Wpisuje wartość w pustą linię KEY="" (wartość przez ENVIRON, więc znaki specjalne nie są interpretowane).
+set_var() {
+  V=$2 awk -v k="$1" 'index($0, k "=\"\"") == 1 { print k "=\"" ENVIRON["V"] "\"" substr($0, length(k) + 4); next } { print }' \
+    "$CONF" >"$CONF.tmp" && cat "$CONF.tmp" >"$CONF" && rm -f "$CONF.tmp"
+}
+
+# Wpisuje hasło w linię konta Samby "login|GECOS|".
+set_smb() {
+  V=$2 awk -v l="$1" '{ t = $0; sub(/^[ \t]+/, "", t) }
+    index(t, "\"" l "|") == 1 && $0 ~ /\|"[ \t]*$/ { sub(/"[ \t]*$/, ""); print $0 ENVIRON["V"] "\""; next } { print }' \
+    "$CONF" >"$CONF.tmp" && cat "$CONF.tmp" >"$CONF" && rm -f "$CONF.tmp"
+}
+
+fill_conf() {
+  local key u
+  # shellcheck disable=SC1090
+  source "$CONF"
+  if [ -z "${HP_ADMIN_PUBKEY:-}" ]; then
+    tty_ok
+    echo "Klucz publiczny SSH admina ($HP_ADMIN_USER). Na hoście: cat ~/.ssh/id_ed25519.pub (albo ssh-keygen -t ed25519)." >/dev/tty
+    while :; do
+      printf 'Wklej klucz (ssh-ed25519 ...): ' >/dev/tty; read -r key </dev/tty
+      case "$key" in ssh-*|ecdsa-*) break ;; *) echo "  to nie wygląda na klucz publiczny" >/dev/tty ;; esac
+    done
+    set_var HP_ADMIN_PUBKEY "$key"
+  fi
+  if [ -z "${HP_SHELL_DECOY_PASS:-}" ]; then
+    tty_ok
+    ask_pass "Hasło konta-przynęty SSH $HP_SHELL_DECOY_USER" "Backup2026_"
+    set_var HP_SHELL_DECOY_PASS "$REPLY"
+  fi
+  for u in "${HP_SAMBA_USERS[@]}"; do
+    [ -z "${u##*|}" ] || continue
+    tty_ok
+    ask_pass "Hasło Samby dla ${u%%|*}" "Fin2026_"
+    set_smb "${u%%|*}" "$REPLY"
+  done
+}
+
 step "1/5 Pakiety"
 PKGS=(gcc make curl-devel openssl-devel libtdb-devel java-21-openjdk-devel maven jq rsync)
 MISSING=()
@@ -69,10 +123,21 @@ if [ "$SAMBA" = auto ]; then
   [ "$SAMBA" = no ] && echo "już skonfigurowany, pomijam (wymuś: --samba)"
 fi
 if [ "$SAMBA" = yes ]; then
-  [ -f "$REPO/samba_structure/honeypot.conf" ] || {
-    echo "Brak samba_structure/honeypot.conf: skopiuj honeypot.conf.example, uzupełnij i uruchom ponownie." >&2; exit 1; }
+  CONF="$REPO/samba_structure/honeypot.conf"
+  if [ ! -f "$CONF" ]; then
+    install -m 600 -o "$BUILD_USER" "$REPO/samba_structure/honeypot.conf.example" "$CONF"
+    echo "utworzono $CONF z przykładu"
+  fi
+  fill_conf
   echo "krok SELinux trwa 1-3 min bez wypisu, nie przerywaj"
   "$REPO/samba_structure/setup-honeypot.sh"
+  # Konto admina dostaje tylko klucz SSH; hasło jest potrzebne do sudo.
+  # shellcheck disable=SC1090
+  ADMIN=$(source "$CONF"; echo "$HP_ADMIN_USER")
+  case "$(passwd -S "$ADMIN" 2>/dev/null | awk '{print $2}')" in
+    P|PS) echo "$ADMIN ma już hasło" ;;
+    *) printf '\nUstaw hasło do sudo dla %s:\n' "$ADMIN" >/dev/tty; passwd "$ADMIN" </dev/tty >/dev/tty 2>&1 ;;
+  esac
 fi
 
 step "5/5 Agent"
