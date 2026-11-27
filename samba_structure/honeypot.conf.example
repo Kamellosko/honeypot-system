@@ -42,5 +42,5 @@ HP_FAKE_DB_HOST="db-fin01"
 HP_FAKE_BACKUP_HOST="nas-arch01"
 
 # Hook PAM: zapis prob hasel SSH (zdarzenie auth.attempt). NIEZWERYFIKOWANE na Almie, moze zablokowac logowanie SSH.
-# Najpierw wykonaj sonde: docs/superpowers/plans/sonda-akceptacyjna-etap2.md. Domyslnie: no.
+# Najpierw sprawdz hook PAM na maszynie. Domyslnie: no.
 #HP_PAM_HOOK=no

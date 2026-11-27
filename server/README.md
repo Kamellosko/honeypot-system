@@ -6,7 +6,7 @@ Serwuje też sam dashboard z katalogu `../dashboard` (ten sam origin, bez CORS).
 z napływających raportów, nie trzeba ich rejestrować.
 
 Domyślnie serwer nasłuchuje **tylko na `127.0.0.1:8443`**: agent i serwer działają na tej samej maszynie,
-a dashboard ogląda się przez tunel SSH. Pełna instalacja na AlmaLinux: [`../INSTALL.md`](../INSTALL.md).
+a dashboard ogląda się przez tunel SSH. Pełna instalacja na AlmaLinux: [`../docs/WDROZENIE-OD-ZERA.md`](../docs/WDROZENIE-OD-ZERA.md).
 
 ## Wymagania
 

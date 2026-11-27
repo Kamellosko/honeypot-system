@@ -124,12 +124,11 @@ Wdrożenie jest **jednomaszynowe**: Samba, agent, kolektor i dashboard działaj�
 | `server/scripts/gen-certs.sh` | lokalne CA i certyfikat serwera, keystore PKCS12 |
 | `server/deploy/honeypot-server.service` | wzorcowa jednostka systemd (instalator generuje własną) |
 | `dashboard/` | `index.html`, `app.js`, `style.css` (statyczne, serwowane przez kolektor) |
-| `scripts/` | instalatory usług, starsza persona `fs01`, `setup-realism.sh`, `sync-events.sh` |
+| `scripts/` | instalatory usług, `setup-realism.sh`, `sync-events.sh` |
 | `samba_structure/` | **obowiązująca** persona „Dział Finansów": `honeypot.conf.example`, `setup-honeypot.sh` |
 | `docs/` | dokumentacja (ten plik, instrukcja wdrożenia, opisy historyczne, PDF) |
 
-> W repozytorium są **dwa warianty persony**: starszy `fs01` (`scripts/setup-samba-honeypot.sh` + `setup-persona.sh`, opis w `INSTALL.md`)
-> oraz obowiązujący „Dział Finansów" (`samba_structure/`, opis w `docs/WDROZENIE-OD-ZERA.md`). Nie wolno mieszać ich na jednej maszynie.
+> Obowiązuje „Dział Finansów" (`samba_structure/`, opis w `docs/WDROZENIE-OD-ZERA.md`). Nie wolno mieszać ich na jednej maszynie.
 > Ten dokument opisuje wariant obowiązujący.
 
 
@@ -789,7 +788,7 @@ MAC jest widoczny tylko w obrębie jednej sieci L2; dla klienta zza routera jest
 - **`auth.attempt`.** `scripts/hp-pam-log` (wywoływany z `pam_exec.so expose_authtok` w `/etc/pam.d/sshd`) zapisuje przez `logger`
   linię `hp-pam: u=<base64 użytkownik> h=<rhost> p=<base64 hasło>` do `/var/log/secure`. Wpięcie w PAM ma uruchamiać hook
   **tylko po nieudanym `pam_unix`**, więc hasło udanego logowania nie trafia do logu. Instalator robi to tylko przy
-  `HP_PAM_HOOK=yes` (niezweryfikowane na Almie; sonda: `docs/superpowers/plans/sonda-akceptacyjna-etap2.md`). Agent parsuje linię
+  `HP_PAM_HOOK=yes` (niezweryfikowane na Almie). Agent parsuje linię
   w `event.c` (`parse_pam`): znacznik programu musi być 5. polem linii syslog (nazwa użytkownika w linii `sshd` jest kontrolowana
   przez atakującego, więc podrobiona linia `hp-pam:` nie tworzy zdarzenia), base64 dekodowany ściśle, hasło obcinane do 256 bajtów.
 - **`net.scan`.** `firewall-cmd --set-log-denied=all` zapisuje odrzucone pakiety do `/var/log/messages`. W `poll_logs` (`monitor.c`)
@@ -1194,7 +1193,8 @@ Plik `.properties` jako pierwszy argument (domyślnie `config/server.properties`
 | `alert.to` | **wymagany przy `alert.enabled=true`** | odbiorcy po przecinku |
 | `alert.max_per_hour` | `60` | limit maili na godzinę |
 
-`scripts/install-server-service.sh` przepisuje `collector.properties` przy każdej instalacji, ale zachowuje linie `alert.*`.
+`scripts/install-server-service.sh` przepisuje `collector.properties` przy każdej instalacji, ale zachowuje linie `alert.*`. Gdy istnieje `server/alert.properties` (poza gitem; wzór: `server/alert.properties.example`), instalator wpisuje je do `collector.properties`.
+`scripts/install-all.sh` robi całą instalację jedną komendą (pakiety, jar, certyfikaty, serwer, wabik, agent); powtórzone uruchomienie aktualizuje bez ruszania certyfikatów, `alert.*` i wabika.
 
 
 *`server/src/main/java/pl/honeypot/server/ServerConfig.java`, linie 27–61*
@@ -1737,8 +1737,7 @@ i spada do `suspicious`/`contact`, mimo że `auth_failures` (licznik łączny) p
 
 ### 7.6 Alarmy e-mail
 
-Pakiet `pl.honeypot.server.alert`; włączane kluczem `alert.enabled=true` (rozdz. 6.1). Projekt: `docs/superpowers/specs/2026-11-26-alerty-email-design.md`,
-konfiguracja krok po kroku: `docs/WDROZENIE-OD-ZERA.md`, rozdz. 10a.
+Pakiet `pl.honeypot.server.alert`; włączane kluczem `alert.enabled=true` (rozdz. 6.1). Konfiguracja krok po kroku: `docs/WDROZENIE-OD-ZERA.md`, rozdz. 10a.
 
 - **Kiedy.** Mail zbiorczy co `3600 / alert.max_per_hour` sekund (domyślnie co 60 s), tylko jeśli w tym czasie coś się wydarzyło.
   `ReportStore` po każdym przyjętym raporcie liczy poziom adresów, których raport dotyczył, i dla każdego adresu na poziomie z `ALERT_LEVELS`
@@ -1829,8 +1828,9 @@ async function refresh() {
 - **Agenci:** tabela stanu (`● online` / `○ offline`), czas ostatniego raportu, liczba raportów, ostatnia operacja.
 - **Atakujący:** dane z `/api/attackers`: adres IP, ocena jako znaczek (POTWIERDZONY, PRZYNĘTA, BRUTE FORCE: czerwone; SKANER, PODEJRZANY: żółte),
   nieudane logowania (łącznie i w 10 min), sygnały (skan, sonda usługi, nieistniejące konta, próba na konto-przynętę, odczyt przynęty), pierwsze
-  i ostatnie wystąpienie. Adresy z samym połączeniem są tylko zliczone. Kliknięcie IP wpisuje go do wyszukiwarki dziennika.
+  i ostatnie wystąpienie; obok niższej niż brute force oceny (albo po wygaśnięciu okna 10 min) stoi dodatkowy znaczek BRUTE FORCE z czasem `last_brute_force`. Adresy z samym połączeniem są tylko zliczone. Kliknięcie IP wpisuje go do wyszukiwarki dziennika.
 - **Dziennik zdarzeń:** tabela z filtrami (źródło, agent, limit, szukanie tekstu, „ukryj szum (unknown)" domyślnie włączone, „ukryj heartbeat"), grupowana po dniach.
+  Powtórzone identyczne nieudane logowania (ten sam typ, serwis, IP, login i hasło, przerwa do 10 min) składają się w jeden wiersz z licznikiem; linie Samby bez adresu grupują się po pliku logu klienta. Log trzyma każdy raport, grupuje tylko widok.
   Wiersze z błędem lub `complete=false` są widoczne zawsze, nawet przy filtrach (luki w obserwacji nie mogą zniknąć).
 - **Szuflada szczegółów:** kliknięcie wiersza otwiera pełny surowy JSON raportu z kolorowaniem składni i przyciskiem „kopiuj".
 - **Kolumna „klasyfikacja"** pokazuje etykietę z `event.type` i `event.service` (np. „SMB · odmowa dostępu", „SSH · sonda usługi (np. nmap -sV)");
@@ -2007,362 +2007,12 @@ Usuwa oznaki wabika widoczne dla kogoś, kto wpisze `ps`, `free`, `ip a`: wyłą
 (`hidepid=2` na `/proc`, więc zwykły użytkownik nie zobaczy `sys-auditd` ani Javy kolektora), obniża `vm.swappiness`, wyłącza adresowanie IPv6 zdradzające MAC karty
 (`stable-privacy`). MAC, DMI, rozmiary dysku i pamięci trzeba ustawić ręcznie w hiperwizorze.
 
-### 9.7 Starszy wariant `fs01`
-
-`scripts/setup-samba-honeypot.sh` + `scripts/setup-persona.sh`: udziały `Dokumenty`, `Faktury`, `Kadry`, grupy `pracownicy/ksiegowosc/kadry`, konta z `SMB_USERS`,
-bez `full_audit` (więc brak śladu odczytów), hostname `fs01.firma.local`, cotygodniowa kopia w cronie. Zachowany z powodów historycznych; opis w `INSTALL.md` i `docs/dzialanie-systemu.md` rozdz. 2.
-
----
-
-## 10. Instalacja, usługi i operacje
-
-Pełna, krok po kroku instrukcja (VirtualBox, klucz SSH, serwer, persona, agent, testy, sprzątanie, usunięcie konta tymczasowego) jest w
-**`docs/WDROZENIE-OD-ZERA.md`**. Ten rozdział opisuje, co robią poszczególne skrypty.
-
-### 10.1 Kolejność
-
-1. Pakiety i kod na maszynie (`dnf install` zależności: `git gcc make curl-devel openssl-devel libtdb-devel java-21-openjdk-devel maven jq rsync`, a dla wabika `samba`, `rsyslog`, `audit` (instaluje je `setup-honeypot.sh`)).
-2. Certyfikaty: `server/scripts/gen-certs.sh IP:127.0.0.1` (w `server/`).
-3. Serwer: `mvn -DskipTests package`, potem `scripts/install-server-service.sh`.
-4. Persona: `samba_structure/setup-honeypot.sh` (z wypełnionym `honeypot.conf`).
-5. Agent: `scripts/install-agent-service.sh` **po** serwerze i **po** personie (żeby agent nie zgłosił zasiewanych linii).
-6. Testy z maszyny testowej, dashboard przez tunel SSH.
-
-### 10.2 `install-server-service.sh`
-
-Tworzy użytkownika systemowego `sysmon` (`/sbin/nologin`), kopiuje jar do `/opt/sysmon/collector.jar` i dashboard do `/opt/sysmon/dashboard`, keystore do
-`/etc/sysmon/collector.p12` (0600, `sysmon`), generuje `/etc/sysmon/collector.properties` (0640, `root:sysmon`) i jednostkę `sysmon-collector.service`.
-Port 8443 nie jest otwierany w firewallu; SELinux dostaje etykietę `http_port_t` dla 8443. Usługa jest **restartowana** (`systemctl restart`), a nie tylko `enable --now`,
-bo `enable --now` nie restartuje działającej usługi i po aktualizacji ruszałby stary jar.
-
-
-*`scripts/install-server-service.sh`, linie 62–69*
-
-```bash
-tee /etc/sysmon/collector.properties >/dev/null <<EOF
-server.bind=127.0.0.1
-server.port=8443
-server.keystore=/etc/sysmon/collector.p12
-server.keystore.password=$KEYSTORE_PASS
-data.dir=/var/lib/sysmon
-dashboard.dir=/opt/sysmon/dashboard
-EOF
-```
-
-*`scripts/install-server-service.sh`, linie 74–105*
-
-```bash
-tee /etc/systemd/system/sysmon-collector.service >/dev/null <<EOF
-[Unit]
-Description=System monitor collector
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=sysmon
-Group=sysmon
-ExecStart=$JAVA_BIN -jar /opt/sysmon/collector.jar /etc/sysmon/collector.properties
-Restart=on-failure
-RestartSec=5
-StateDirectory=sysmon
-StateDirectoryMode=0700
-UMask=0077
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateDevices=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictSUIDSGID=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-LockPersonality=true
-CapabilityBoundingSet=
-
-[Install]
-WantedBy=multi-user.target
-EOF
-```
-
-Jednostka serwera ogranicza proces (`ProtectSystem=strict`, `NoNewPrivileges`, `CapabilityBoundingSet=` puste, `RestrictAddressFamilies` bez `AF_NETLINK`).
-Dane trafiają do `StateDirectory=sysmon` (`/var/lib/sysmon`, 0700).
-
-### 10.3 `install-agent-service.sh`
-
-Zmienne: `SERVER_IP` (domyślnie `127.0.0.1`), `SERVER_PORT` (8443), `AGENT_ID` (domyślnie `hostname -s`), `FORTIFY_LEVEL` (2), `CA_FILE`.
-Kroki: instalacja CA serwera w magazynie zaufania, próba połączenia TLS z `/api/stats` (ostrzeżenie, jeśli się nie uda), budowa jako użytkownik, który wywołał `sudo`
-(katalog `build/` zrobiony przez roota blokowałby potem zwykły `make`), `make install`, drop-in systemd z parametrami i `systemctl restart sys-auditd`.
-
-
-*`scripts/install-agent-service.sh`, linie 70–74*
-
-```bash
-tee /etc/systemd/system/sys-auditd.service.d/override.conf >/dev/null <<EOF
-[Service]
-ExecStart=
-ExecStart=/usr/local/sbin/sys-auditd --id $AGENT_ID --ip $SERVER_IP --port $SERVER_PORT
-EOF
-```
-
-### 10.4 Weryfikacja po instalacji
-
-```sh
-systemctl status sys-auditd sysmon-collector smb nmb              # wszystkie active
-ls /var/lib/sys-auditd/pending | wc -l                             # kolejka, powinno być ok. 0
-ls /var/lib/sys-auditd/pending | grep -c rejected                  # odrzucone na stałe, powinno być 0
-tail -n 3 /var/lib/sysmon/events.jsonl | jq -c '{event_id,source,operation,analysis,error}'
-curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/agents   # agent "online" po ok. minucie
-curl --cacert server/certs/ca.crt https://127.0.0.1:8443/api/attackers
-```
-
-Scenariusze testowe z maszyny testowej (`smbclient`):
-
-```sh
-smbclient //<IP>/Finanse -U a.kowalska%zle -c ls                       # authentication_failure (NT_STATUS_LOGON_FAILURE)
-smbclient //<IP>/Finanse -U a.kowalska%'<haslo>' -c 'put x.txt'        # share/create + wpis samba_audit
-smbclient //<IP>/Archiwum\$ -U a.kowalska%'<haslo>' -c 'get IT/kopia_zapasowa.sh'   # breadcrumb_read
-ssh backup_srv@<IP>                                                     # authentication_success -> confirmed
-```
-
-### 10.5 Aktualizacja
-
-Po zmianie kodu: `make -C agent check` (testy), przebudowa jar (`mvn -DskipTests package`) i ponowne uruchomienie instalatorów (są idempotentne i restartują usługi).
-Dashboard jest kopiowany do `/opt/sysmon/dashboard` przy każdej instalacji serwera.
-
-### 10.6 Kopia dowodów poza maszynę (`scripts/sync-events.sh`)
-
-Atakujący z rootem na honeypocie może skasować lokalny `events.jsonl`. Skrypt kopiuje plik na inną maszynę przez `rsync --append-verify` (log tylko rośnie, więc dosyłana jest końcówka):
-
-
-*`scripts/sync-events.sh`, linie 23–32*
-
-```bash
-: "${REMOTE:?Ustaw REMOTE=uzytkownik@host:/sciezka/}"
-SRC="${SRC:-/var/lib/sysmon/events.jsonl}"
-SSH_KEY="${SSH_KEY:-/root/.ssh/id_ed25519}"
-
-[ -f "$SRC" ] || exit 0   # jeszcze brak zdarzeń
-
-# --append-verify: log tylko rośnie, więc dosyłamy końcówkę.
-exec rsync -a --append-verify \
-  -e "ssh -i \"$SSH_KEY\" -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
-  "$SRC" "$REMOTE"
-```
-
-Wymaga klucza SSH bez hasła do celu. Klucz leży na honeypocie, więc po stronie odbiorcy należy go ograniczyć (`restrict,command="rrsync -wo /srv/honeypot-logs"`) i robić
-własne, niezależne kopie. To jedyny ruch wychodzący z maszyny. **Skrypt nie był przetestowany w pełnym wdrożeniu** (zob. `docs/WDROZENIE-OD-ZERA.md`, rozdz. 14).
-
----
-
-## 11. Model bezpieczeństwa
-
-| Obszar | Środek | Ograniczenie |
-|---|---|---|
-| Komunikacja agent–kolektor | TLS z weryfikacją łańcucha i SAN, bez opcji wyłączenia | brak uwierzytelniania agenta; ochroną jest loopback |
-| API kolektora | nasłuch tylko `127.0.0.1`, brak reguły w firewallu | każdy lokalny użytkownik widzący port może czytać dane i wysyłać raporty; `hidepid=2` ukrywa proces, nie port |
-| Dane | `events.jsonl` 0600, katalogi agenta 0700 | zawierają treść plików i logów; root je odczyta |
-| Ścieżki w udziałach | `openat2` z `RESOLVE_BENEATH` | wymaga Linuksa 5.6+ |
-| Pamięć | `explicit_bzero` na buforach | nie chroni przed odczytem pamięci procesu przez roota |
-| Usługi systemd | `NoNewPrivileges`, `ProtectSystem=strict`, ograniczone `CapabilityBoundingSet` i rodziny adresów | agent działa jako root (z `CAP_DAC_READ_SEARCH`) |
-| Klucze | `ca.key` usuwany po wygenerowaniu | `server.key` i `server-keystore.p12` zostają na maszynie |
-| Wejście z zewnątrz | escapowanie JSON i HTML, limity (64 MB, 1000 agentów, 200 kluczy liczników, 10 000 atakujących) | |
-| Dowody | rsync poza maszynę | klucz rsync leży na honeypocie |
-| Konto-przynęta | brak `sudo`, hasło tylko w okruszku | daje prawdziwą powłokę; wymaga utwardzenia i kontroli ruchu wychodzącego |
-
-Maszyna ma stać w izolowanej sieci. Przynęta z prawdziwą powłoką (`backup_srv`) oznacza, że przejęcie tego konta pozwala na działania lokalne, a więc **egress musi być
-ograniczony** na poziomie sieci.
-
----
-
-## 12. Testy
-
-Agent ma ok. 25 plików testowych w `agent/tests` (`make check`). Testy jednostkowe w C korzystają z techniki **`ld --wrap`**: Makefile linkuje test z flagą
-`-Wl,--wrap=<funkcja>`, a test dostarcza `__wrap_<funkcja>`, która udaje błąd (np. `getrandom`, `renameat`, `read`, `curl_easy_perform`, `socket`, `recvmsg`, `malloc`).
-W ten sposób testowane są ścieżki awarii, których nie da się wywołać na prawdziwym systemie. Fragment testu heartbeatu:
-
-
-*`agent/tests/heartbeat_test.c`, linie 16–32*
-
-```c
-static int random_error, random_short, random_interrupted;
-
-ssize_t __wrap_getrandom(void *buffer, size_t size, unsigned flags) {
-  assert(size == sizeof(random_value) && flags == 0);
-  if (random_interrupted) { random_interrupted = 0; errno = EINTR; return -1; }
-  if (random_error) { errno = EIO; return -1; }
-  memcpy(buffer, &random_value, size);
-  return random_short ? 1 : (ssize_t)size;
-}
-
-int main(void) {
-  char path[] = "/tmp/hp-heartbeat-XXXXXX";
-  struct hp_store store;
-  assert(mkdtemp(path));
-  assert(!hp_store_init(&store, path, "test-agent"));
-  double deadline = 0;
-  assert(!hp_heartbeat_tick(&store, 100, &deadline));
-```
-
-Wpis w Makefile dla tego testu:
-
-```make
-build/heartbeat_test: tests/heartbeat_test.c $(filter-out src/main.c,$(SOURCES)) ... | build
-	$(CC) ... $< $(filter-out src/main.c,$(SOURCES)) build/cJSON.o $(LDLIBS) -Wl,--wrap=getrandom -o $@
-```
-
-Zakres testów:
-
-| Test | Co sprawdza |
-|---|---|
-| `config_test`, `io_test` | parsowanie `smb.conf`, `openat2`, kontrola plików prywatnych |
-| `snapshot_test`, `binary_test`, `diff_test` + `diff_roundtrip.py` | migawki, diff tekstowy i blokowy (rekonstrukcja nowego pliku ze starego i diffu) |
-| `monitor_test`, `rename_overwrite_test`, `root_rebind_test`, `log_test` | inotify, rename, podmiana katalogu udziału, rotacja i obcięcie logów |
-| `network_test`, `connections_test`, `connection_poll_test` | wyciąganie IP, ARP, netlink `SOCK_DIAG` |
-| `heartbeat_test`, `report_id_test`, `protocol_test` | termin i rozrzut heartbeatu, błędy `RAND_bytes`, UTF-8 i base64 |
-| `transport_test`, `transport_failure_test`, `https_integration.py` | wysyłka, kody HTTP, awarie libcurl, połączenie TLS z prawdziwym serwerem |
-| `report_failure_test`, `state_failure_test`, `allocation_test`, `wipe_test` | awarie zapisu i alokacji, zerowanie buforów |
-| `lifecycle_test` | cały `hp_run` z podmienionymi zależnościami (start, heartbeat, zamknięcie) |
-| `release_test.py` | binarka release (bez symboli, `debuglink`) |
-
-Kolektor (Java) **nie ma obecnie testów jednostkowych**: katalog `server/src/test` nie zawiera żadnych plików `.java`. Logika deduplikacji, zapisu i wykrywania atakujących jest sprawdzana tylko ręcznie (np. `curl` z `server/examples/*.json`).
-
----
-
-## 13. Znane ograniczenia i luki
-
-Stan na 2026-11-20. Lista wynika z czytania kodu; nie wszystko sprawdzono na działającej maszynie.
-
-### 13.1 Wysoki wpływ
-
-1. **Odczyt pliku nie jest widoczny dla agenta.** Maska inotify nie zawiera `IN_OPEN`/`IN_ACCESS`. Ślad odczytów zostawia wyłącznie `full_audit` w Sambie
-   (wariant „Dział Finansów"). W starszym wariancie `fs01` pobranie pliku nie zostawia żadnego śladu.
-2. **Brak uwierzytelniania kolektora.** Atakujący z powłoką (np. przez `backup_srv`) może dotrzeć do `127.0.0.1:8443`, wstrzyknąć fałszywe raporty i czytać wszystko przez API.
-   Dokument projektowy przewidywał token lub mTLS; nie zaimplementowano.
-3. **Przejęcie roota kasuje lokalne dowody.** Zabezpiecza tylko zewnętrzna kopia (`sync-events.sh`), nieprzetestowana w pełnym wdrożeniu, z kluczem leżącym na honeypocie.
-4. **Przynęta z prawdziwą powłoką** wymaga utwardzenia i ograniczenia ruchu wychodzącego, które nie są częścią skryptów.
-
-### 13.2 Średni wpływ
-
-5. **TCP przez próbkowanie 1 s:** brak skanów SYN, krótkie połączenia mogą umknąć; długa sesja jest raportowana raz.
-6. **Historia logów sprzed startu agenta jest pomijana** (offset na końcu przy pierwszym zobaczeniu pliku).
-7. **`events.jsonl` rośnie bez rotacji**, a zbiór `report_id` rośnie w pamięci bez limitu; start kolektora czyta cały plik. Przy dużym ruchu logów (jedna linia to jeden raport)
-   wymaga to obserwacji.
-8. **Nowy handshake TLS na każdy raport** i kolejność `readdir`; przy zalewie linii logu kolejka może narastać do 10 000 raportów, po czym agent odrzuca nowe (`observation_gap`).
-9. **Pliki `.rejected` nie są czyszczone** (nie liczą się do limitu kolejki, ale zajmują miejsce).
-10. **Zapisy plików nie niosą IP klienta.** Powiązanie z kimś jest tylko w `evidence[]` (linia `full_audit` z ostatnich 60 s zawierająca nazwę pliku), więc przy wielu równoległych
-    klientach lub zmianie pliku bez wpisu w audycie jest to tylko wskazówka czasowa.
-11. **Dashboard nie pokazuje `/api/attackers`**, a luki obserwacji (`observation_gap`) nie są podświetlone jako ostrzeżenia (ich klasyfikacja to `unknown`).
-12. **Okruszek jest osiągalny dopiero po zdobyciu konta persony** (`Archiwum$` wymaga `@finanse`).
-13. **Okno „online" 90 s** liczone czasem serwera; przy krótkiej przerwie sieciowej agent może mignąć jako `offline`.
-
-### 13.3 Niskie / porządkowe
-
-14. W `server/certs/` po wygenerowaniu zostają `server.key` i keystore; przed realnym wdrożeniem wygenerować nowe poza repozytorium. Certyfikat jest ważny 10 lat.
-15. Domyślny `DEST_PORT` agenta to 443, a kolektor słucha na 8443; instalator zawsze przekazuje `--port`, ale ręczne uruchomienie bez flag nie zadziała.
-16. Agent buduje się z `FORTIFY_LEVEL=2` (GCC 11, AlmaLinux 9.8); na AlmaLinux 10 można użyć 3.
-17. Dwa warianty persony w repozytorium (`fs01` i „Dział Finansów"); nie wolno ich mieszać.
-18. Całość wdrożenia nie była przejechana jednym ciągiem na zupełnie nowej maszynie (zob. `docs/WDROZENIE-OD-ZERA.md`, rozdz. 14).
-
----
-
-## 14. Parametry i limity
-
-| Parametr | Wartość | Gdzie |
-|---|---|---|
-| Heartbeat | 60 s ±15% | `config.h`, `heartbeat.c` |
-| Okno „online" agenta | 90 s | `ReportStore.ONLINE_AFTER` |
-| Próbkowanie TCP i pętla główna | ≤ 1 s | `main.c`, `connections.c` |
-| Ponowne wykrycie źródeł | 60 s | `main.c` |
-| Maks. gniazd TCP | 65 536 | `connections.c` |
-| Maks. kolejka raportów | 10 000 | `snapshot.c` (`PENDING_MAX`) |
-| Maks. kopiowany plik | 64 MiB | `snapshot.c` (`CAPTURE_MAX`) |
-| Próby `capture()` | 3 | `snapshot.c` |
-| Diff tekstowy | plik ≤ 1 MiB, tablica LCS ≤ 1 048 576 komórek | `diff.c` |
-| Bloki binarne | 64 KiB, razem ≤ 16 MiB na raport | `snapshot.c` (`BLOCKS_MAX`) |
-| Odczyt logu | ≤ 1 MiB na plik na iterację; rekord ≤ 64 KiB | `monitor.c` |
-| Pierścień dowodów | 32 linie, 60 s | `snapshot.c` |
-| Kolejki `created` i `moves` | po 128 wpisów | `monitor.c` |
-| Adresy IP z jednej linii | 8 | `network.h` (`HP_NETWORK_MAX`) |
-| Timeouty HTTPS agenta | 5 s połączenie, 30 s całość | `port.c` |
-| Ponowienie wysyłki | 5 s; po 3 odpowiedziach 5xx/408/429 z rzędu koniec przebiegu | `main.c`, `port.c` |
-| Maks. żądanie serwera | 64 MB | `Main.java` |
-| Maks. różnych agentów | 1000 | `ReportStore.MAX_AGENTS` |
-| Maks. kluczy liczników | 200 | `ReportStore.MAX_KEYS` |
-| Maks. atakujących | 10 000 | `ReportStore.MAX_ATTACKERS` |
-| Próg `brute_force` | 5 błędów / 10 min | `ReportStore` |
-| Próg `fast_enum` | 3 porty / 60 s | `ReportStore` |
-| `GET /api/events` | domyślnie 100, maks. 1000 | `EventsQueryHandler` |
-| Odświeżanie dashboardu | 4 s, timeout żądania 3 s | `app.js` |
-
----
-
-## 15. Słownik operacji i klasyfikacji
-
-### 15.1 Źródła (`source`) i operacje (`operation`)
-
-| `source` | `operation` | Znaczenie |
-|---|---|---|
-| `share` | `create`, `modify`, `delete`, `metadata`, `rename`, `rename_overwrite` | zdarzenia plikowe w udziale |
-| `share` | `create_delete` | plik utworzony i usunięty przed zamknięciem, treść niedostępna |
-| `share` | `downtime_change`, `delete_during_downtime`, `reconcile` | zmiany wykryte po (re)starcie lub po przeniesieniu katalogu |
-| `share` | `source_unavailable` | nie udało się objąć udziału obserwacją (`watch_failed`, `share_root_missing_or_inaccessible`) |
-| `log` | `append` | nowa linia (lub fragment: `long_record_segment`, `partial_record_at_*`) |
-| `log` | `rotation`, `truncation` | rotacja lub obcięcie, `possible_log_gap` |
-| `log` | `source_unavailable` | log niedostępny (`missing_or_inaccessible_log`) |
-| `network` | `tcp_connection_observed` | połączenie przychodzące do usługi nasłuchującej |
-| `network` | `observation_gap` | `tcp_observation_failed` |
-| `system` | `heartbeat` | sygnał życia |
-| `monitor` | `observation_gap` | `inotify_overflow`, `monitor_or_spool_failure`, `create_queue_capacity`, `rename_cookie_capacity`, `rename_*_failed`, `share_root_empty`, `path_too_long` |
-| `source` | `source_unavailable`, `observation_gap` | błąd wykrywania źródeł (`source_discovery_failed`, `missing_log`, błąd konfiguracji Samby) |
-
-### 15.2 Klasyfikacje (`analysis.classification`)
-
-| Klasyfikacja | Skąd | Ton w dashboardzie |
-|---|---|---|
-| `file_change` | zmiana pliku (create/modify/delete/...) | czerwony |
-| `rename` | przeniesienie | czerwony |
-| `tcp_connection` | połączenie TCP | żółty |
-| `authentication_failure` | linia logu (SSH, Samba) | czerwony |
-| `authentication_success` | linia logu (udane logowanie) | żółty |
-| `samba_audit` | linia `full_audit` | żółty |
-| `heartbeat` | heartbeat | neutralny |
-| `unknown` | pozostałe linie i raporty proste | neutralny |
-
----
-
-## 16. Rozwiązywanie problemów
-
-| Objaw | Przyczyna i rozwiązanie |
-|---|---|
-| Dashboard: „brak połączenia z serwerem" | tunel SSH nie działa lub kolektor stoi: `systemctl status sysmon-collector`, `ss -ltnp \| grep 8443` |
-| Agent `offline` | `systemctl status sys-auditd`, `journalctl -u sys-auditd`; ręczny test: `curl --cacert ca.crt https://127.0.0.1:8443/api/stats` (zaufanie CA, SAN) |
-| Kolejka `pending/` rośnie | kolektor niedostępny lub błąd TLS (certyfikat bez adresu w SAN, wygasły, CA niezaufane: `update-ca-trust`) |
-| Pliki `*.json.rejected` w `pending/` | kolektor odpowiedział 4xx: zły `agent_id` (dozwolone `[A-Za-z0-9._-]`, ≤ 64) lub zła koperta; sprawdź `--id` |
-| Brak raportów `samba_audit` | `full_audit` wyłączony lub nazwy operacji nieznane w danej Sambie (`tree connect failed: NT_STATUS_UNSUCCESSFUL`); sprawdź `testparm -s`, `/var/log/samba/audit.log`, regułę rsyslog |
-| Brak `breadcrumb_read` | odczyt pliku nie przeszedł przez `full_audit` lub `detection.breadcrumb.marker` nie pasuje do nazwy pliku |
-| `authentication_failure` bez IP | linia logu nie zawiera adresu w znanym formacie; sprawdź `network_context` w surowym JSON w dashboardzie |
-| Fałszywe `file_change` na udziałach | coś (cron, backup) modyfikuje monitorowane katalogi; trzymaj aktywność poza udziałami |
-| Nowy kod nie działa po instalatorze | stare instalatory używały `enable --now`; obecne restartują usługi |
-| `make: Brak dostępu` w `agent/build` | katalog zrobił root: `sudo chown -R $USER: agent/build` |
-| `bind ... Address already in use` przy tunelu | port zajęty: `ss -ltnp \| grep 8443` lub inny port lokalny |
-| `last` pokazuje dziwne wpisy | użyj aktualnej wersji skryptu (zasiewa poprawny `wtmp`) |
-
-Więcej przypadków (instalacja, `sudo`, `smbpasswd`, SELinux): `docs/WDROZENIE-OD-ZERA.md`, rozdz. 13.
-
----
-
 ## Dodatek: powiązane dokumenty
 
 | Dokument | Zawartość |
 |---|---|
 | `README.md` | skrót i spis katalogów |
 | `docs/WDROZENIE-OD-ZERA.md` | pełna instrukcja wdrożenia „Dział Finansów" krok po kroku |
-| `INSTALL.md` | starszy wariant `fs01` (Alma + Mint) |
 | `docs/PRZEGLAD.md` | jak to działa w skrócie |
-| `docs/dzialanie-systemu.md` | opis techniczny z 2026-10-23 (częściowo historyczny, oznaczony) |
-| `docs/DokumentacajHoneypot-3.pdf` | dokumentacja agenta w PDF |
-| `docs/projekt_honeypot.md` | pierwotna koncepcja i plan projektu (tarpit i IoC nie są zaimplementowane) |
 | `server/docs/api.md`, `server/docs/attacker-detection.md` | API i wykrywanie atakujących |
 | `samba_structure/ustalenia-konfiguracja.md` | decyzje projektowe persony |

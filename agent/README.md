@@ -9,7 +9,6 @@ Program jest usługą użytkową dla AlmaLinux 9.8 i 10: wykrywa udziały Samby,
 | `third_party/cJSON/` | Biblioteka używana przez testy, z oryginalnymi informacjami licencyjnymi |
 | `packaging/` | Jednostka systemd i przykład nadpisania parametrów |
 | `Makefile` | Budowanie, testowanie, instalacja i czyszczenie |
-| `../docs/dzialanie-systemu.md` | Szczegółowy opis działania agenta, schematu raportów i znanych ograniczeń |
 
 Pakiet nie zawiera binariów, symboli diagnostycznych, zebranych logów, migawek, kolejki raportów ani lokalnych ustawień narzędzi programistycznych.
 
@@ -121,7 +120,7 @@ Zachowuj prefiks `hp_`, dwie spacje wcięcia i sprawdzanie błędów. Nie zmieni
 
 ## 6. Ograniczenia i testy na serwerze
 
-Parser nie odtwarza całej semantyki Samby: obsługuje statyczny podzbiór `smb.conf`, lokalne konta tdbsam v4 lub smbpasswd oraz wybrane podstawienia `[homes]`. Nieobsługiwane konfiguracje i źródła muszą być widoczne w raportach statusu. Restrykcyjne otwieranie ścieżek odrzuca symlinki, także w systemowych plikach include. Szczegóły i limity są w `../docs/dzialanie-systemu.md`.
+Parser nie odtwarza całej semantyki Samby: obsługuje statyczny podzbiór `smb.conf`, lokalne konta tdbsam v4 lub smbpasswd oraz wybrane podstawienia `[homes]`. Nieobsługiwane konfiguracje i źródła muszą być widoczne w raportach statusu. Restrykcyjne otwieranie ścieżek odrzuca symlinki, także w systemowych plikach include. Szczegóły i limity są w `docs/DOKUMENTACJA-TECHNICZNA.md`.
 
 Obserwacja TCP korzysta z okresowych migawek tabeli gniazd. Może pominąć krótkie połączenia i nie dowodzi wywołania `accept()`. Adres MAC z lokalnej pamięci ARP jest kontekstem, nie dowodem sprawstwa; dla zdalnego klienta może być niedostępny.
 

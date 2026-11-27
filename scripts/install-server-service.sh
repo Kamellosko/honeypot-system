@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Instaluje serwer+dashboard (na TEJ SAMEJ maszynie co agent, nasłuch tylko 127.0.0.1) jako usługę systemd na maszynie S (AlmaLinux 9.8),
 # tak żeby startował automatycznie po boocie i restartował się po awarii.
-# Odpowiednik sekcji 2A w INSTALL.md.
+# Zob. docs/WDROZENIE-OD-ZERA.md.
 #
 # Wymagania (zrób PRZED uruchomieniem, w katalogu server/):
 #   - zbudowany jar:   target/honeypot-server.jar     (mvn -DskipTests package)

@@ -1,9 +1,8 @@
-# Wdrożenie od zera na nowej maszynie (wariant „Dział Finansów")
+ # Wdrożenie od zera na nowej maszynie (wariant „Dział Finansów")
 
 Ta instrukcja prowadzi przez całość: od czystego hiperwizora do działającego wabika z agentem, dashboardem i testami.
 Zbiera w jednym miejscu to, co powstawało po kawałku. Obowiązuje wariant z katalogu `samba_structure/`
-(serwer plików działu finansów, konto-przynęta `backup_srv`, okruszek w ukrytym udziale). Starszy wariant `fs01`
-(`INSTALL.md`, `setup-samba-honeypot.sh`) jest osobny i **nie wolno mieszać obu** na jednej maszynie.
+(serwer plików działu finansów, konto-przynęta `backup_srv`, okruszek w ukrytym udziale).
 
 Polecenia mają znacznik, na której maszynie się je wpisuje:
 
@@ -345,7 +344,7 @@ Certyfikat jest samopodpisany: potwierdź wyjątek bezpieczeństwa.
 
 ### 10a.2 Włączenie na wabiku **[Alma]**
 
-Dopisz na końcu `/etc/sysmon/collector.properties` (instalator serwera zachowuje linie `alert.*` przy aktualizacji):
+Najprościej: skopiuj `server/alert.properties.example` do `server/alert.properties`, uzupełnij i uruchom `install-server-service.sh` (albo `install-all.sh`); instalator wpisze te linie sam. Ręcznie: dopisz na końcu `/etc/sysmon/collector.properties` (instalator serwera zachowuje linie `alert.*` przy aktualizacji):
 
 ```properties
 alert.enabled=true

@@ -237,7 +237,7 @@ else
   echo "   (brak $HP_PAM_SRC — pomijam hook PAM)"
 fi
 # Wpiecie w stos PAM jest NIEZWERYFIKOWANE na AlmaLinux i moze zablokowac logowanie SSH, dlatego jest wylaczone,
-# dopoki nie ustawisz HP_PAM_HOOK=yes w honeypot.conf. Najpierw wykonaj sonde: docs/superpowers/plans/sonda-akceptacyjna-etap2.md
+# dopoki nie ustawisz HP_PAM_HOOK=yes w honeypot.conf. Najpierw sprawdz hook PAM na maszynie.
 # (trzymaj druga sesje root otwarta). Hook ma sie uruchamiac TYLKO po nieudanym pam_unix: haslo udanego logowania
 # nigdy nie moze trafic do logu. Przywrocenie: cp /etc/pam.d/sshd.hp-orig /etc/pam.d/sshd
 if [ "${HP_PAM_HOOK:-no}" = "yes" ] && [ -x /usr/local/libexec/hp-pam-log ]; then

@@ -124,7 +124,7 @@ nie trafiają do maili (to głównie szum z Windowsów). Najwyżej 60 maili na g
 Co 4 s pobiera `stats`, `agents`, `events` i `attackers`. Pokazuje karty agentów (ONLINE/OFFLINE), panel atakujących z oceną
 (POTWIERDZONY, PRZYNĘTA, BRUTE FORCE, SKANER, PODEJRZANY), tabelę zdarzeń z filtrami i po kliknięciu pełny surowy JSON raportu.
 Zdarzenia mają czytelne etykiety z typem i serwisem („SSH · nieudane logowanie", „SMB · odmowa dostępu"), a przy IP stoi znaczek oceny;
-kliknięcie IP filtruje dziennik. Dostęp tylko przez tunel SSH.
+kliknięcie IP filtruje dziennik. Identyczne nieudane logowania (IP, login, hasło) zwijają się w jeden wiersz z licznikiem. Dostęp tylko przez tunel SSH.
 
 ---
 
@@ -139,7 +139,7 @@ kliknięcie IP filtruje dziennik. Dostęp tylko przez tunel SSH.
 
 Kto to zrobił, z samego raportu nie wynika. Trzeba to dopasować po czasie do raportów `tcp_connection_observed` i logowań.
 
-## Znane luki (szczegóły w `dzialanie-systemu.md`, rozdz. 13)
+## Znane luki
 
 - Odczyt lub pobranie pliku nie zostawia śladu, bo Samba nie ma włączonego audytu operacji na plikach.
 - Brak korelacji zdarzeń i progów (np. „20 prób logowania z jednego IP"). Ocenia analityk.

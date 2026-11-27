@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Buduje agenta i instaluje go jako usługę systemd (sys-auditd) na maszynie H
 # (AlmaLinux 9.8), tak żeby startował automatycznie po boocie i restartował się
-# po awarii. Odpowiednik sekcji 2B (agent) w INSTALL.md.
+# po awarii. Zob. docs/WDROZENIE-OD-ZERA.md.
 #
 # Uruchom jako root na H:
 #   sudo ./install-agent-service.sh            # serwer na tej samej maszynie (127.0.0.1) [katalog_zrodel_agenta]
@@ -9,7 +9,7 @@
 # Zmienne:
 #   SERVER_IP     adres serwera (domyślnie 127.0.0.1 — ta sama maszyna)
 #   CA_FILE       certyfikat CA do zaufania (domyślnie server/certs/ca.crt w repo)
-#   Uruchom PO install-server-service.sh; AGENT_ID ustaw jawnie (np. fs01), jeśli
+#   Uruchom PO install-server-service.sh; AGENT_ID ustaw jawnie (np. fs-finanse), jeśli
 #   nazwa hosta ma się jeszcze zmienić (setup-persona.sh).
 #   SERVER_PORT   port serwera (domyślnie 8443)
 #   AGENT_ID      identyfikator (domyślnie nazwa hosta)
