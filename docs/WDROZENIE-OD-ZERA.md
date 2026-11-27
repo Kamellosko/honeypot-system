@@ -317,11 +317,11 @@ w izolowanej sieci, a własne wpisy rozpoznajesz po adresie hosta (`192.168.56.1
 
 ## 10a. Alarmy e-mail
 
-Serwer wysyła mail, gdy adres IP wchodzi na poziom SKANER (`fast_enum`), BRUTE FORCE, PRZYNĘTA (próba logowania
-na `backup_srv` albo odczyt pliku-przynęty) lub POTWIERDZONY. Pojedyncze nieudane logowania, sondy i nieistniejące konta
-maila nie wysyłają (to głównie szum, np. Windows sam logujący się do udziału). Jeden IP dostaje mail tylko przy wejściu
-na wyższy poziom; limit to 60 maili na godzinę, a zdarzenia z historii wczytanej przy starcie nie wysyłają maili.
-W treści nie ma haseł. Domyślnie alarmy są wyłączone.
+Co minutę, jeśli coś się działo, serwer wysyła jeden zbiorczy mail o adresach na poziomie SKANER (`fast_enum`), BRUTE FORCE,
+PRZYNĘTA (próba logowania na `backup_srv` albo odczyt pliku-przynęty) lub POTWIERDZONY: co robiły w tej minucie i czy weszły
+na nowy poziom. Spokojna minuta nie wysyła nic. Adresy z pojedynczymi nieudanymi logowaniami, sondami i nieistniejącymi kontami
+do maili nie trafiają (to głównie szum, np. Windows sam logujący się do udziału). Najwyżej 60 maili na godzinę; zdarzenia
+z historii wczytanej przy starcie maili nie wysyłają. W treści nie ma haseł. Domyślnie alarmy są wyłączone.
 
 ### 10a.1 Skrzynka w laboratorium **[Host]**
 

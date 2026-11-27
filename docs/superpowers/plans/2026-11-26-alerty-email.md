@@ -246,3 +246,20 @@ Expected: `--test-alert` kod 0 i mail „[honeypot] test alarmu” w Thunderbird
 git add server/src scripts/install-server-service.sh docs/WDROZENIE-OD-ZERA.md
 git commit -m "Alarmy e-mail: konfiguracja, --test-alert, instalator i instrukcja"
 ```
+
+---
+
+### Task 5 (zmiana 2026-11-27): mail zbiorczy co minutę
+
+Spec p. 4–6 po zmianie. Zastępuje „jeden mail na IP i poziom”.
+
+**Files:** `AlertSink.java` (metoda `activity`), `AlertNotice.java` (`agentId, attacker, reason, boolean newLevel, Recent event`),
+`ReportStore.java` (powiadomienie przy każdym zdarzeniu od IP na poziomie z `ALERT_LEVELS`; usunięta lista `recent`),
+`AlertService.java` (bufor per IP, `tick()` co `3600/maxPerHour` s, bez kolejki i ponowień), `AlertFormatter.java` (`subject/body` dla listy wpisów),
+testy `ReportStoreAlertTest`, `AlertServiceTest`; dokumentacja (`DOKUMENTACJA-TECHNICZNA` 7.6, `dzialanie-systemu`, `PRZEGLAD`, `WDROZENIE` 10a).
+
+- [ ] Testy (RED): `ReportStoreAlertTest` — 4 błędy: 0 powiadomień; 5.: 1 z `newLevel`; 6.: kolejne bez `newLevel`; restart z historią i dalszy atak: powiadomienie bez `newLevel`;
+      `AlertServiceTest` — pusty `tick()` bez maila; zdarzenia dwóch IP → jeden mail, temat `2 atakujących, 4 zdarzenia`, `3× SMB · nieudane logowanie`, konta;
+      „NOWY POZIOM”; drugi `tick()` tylko nowe; nieudana wysyłka → zdarzenia w następnym mailu; interwał 60 s przy 60/h i 120 s przy 30/h.
+- [ ] Implementacja, `mvn -q test` kod 0, commit `Alarmy: mail zbiorczy co minute zamiast jednego na IP`.
+- [ ] Dokumentacja, wgranie na Almę, test z Kali.

@@ -169,7 +169,7 @@ agreguje zdarzenia (np. `scans.network_portscan_horizon`).
 Serwer **stopniuje** atakujących w `/api/attackers` (`contact` → `suspicious` → `fast_enum` → `brute_force` → `bait` → `confirmed`)
 z progami (≥5 nieudanych logowań/10 min, ≥3 porty/60 s, `net.scan` od agenta) i **okruszkiem** (odczyt `kopia_zapasowa.sh` albo próba
 na `backup_srv` = `bait`; udane SSH jako `backup_srv` = pewny atak). Przy wejściu IP na `fast_enum` i wyżej serwer wysyła **e-mail**
-(SMTP, jeden kanał; limit 60/h, bez maili za szum pojedynczych prób).
+(SMTP, jeden kanał; mail zbiorczy co minutę, gdy coś się dzieje; bez maili za szum pojedynczych prób).
 
 | | OpenCanary | Nasz |
 |---|---|---|
