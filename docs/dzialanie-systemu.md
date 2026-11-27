@@ -357,7 +357,7 @@ Skutki: awaria serwera nie gubi danych (kolejka rośnie do 10 000); dostawa to *
   okruszka) > `brute_force` (5+ nieudanych logowań w 10 min) > `fast_enum` (skan albo 3+ porty w minutę) > `suspicious` (pojedyncze nieudane
   logowanie, sonda usługi, nieistniejące konto) > `contact`. Szczegóły: `DOKUMENTACJA-TECHNICZNA.md`, rozdz. 7.
 - **Alarmy e-mail** (`alert.enabled=true`): jeden mail, gdy IP wejdzie na `fast_enum`, `brute_force`, `bait` lub `confirmed` wyżej niż ostatnio
-  zgłoszony; limit 60 na godzinę, wysyłka w osobnym wątku, bez haseł w treści, bez maili za historię wczytaną przy starcie.
+  zgłoszony; po 30 minutach ciszy z danego IP poziom jest zgłaszany od nowa (ponowne uzbrojenie); limit 60 na godzinę, wysyłka w osobnym wątku, bez haseł w treści, bez maili za historię wczytaną przy starcie.
   Konfiguracja: `WDROZENIE-OD-ZERA.md`, rozdz. 10a.
 - **API odczytu** (bez uwierzytelniania): `GET /api/agents`, `GET /api/events?agent_id=&source=&limit=` (od najnowszych
   wg kolejności zapisu), `GET /api/stats`, `GET /api/attackers` (wykryci atakujący, stopniowani po zachowaniu,

@@ -266,6 +266,12 @@ function renderAgents(agents) {
   }
 }
 
+// Second badge for an IP that reached the brute-force threshold but is graded higher (or has calmed down since).
+function bruteTag(a) {
+  if (!a.last_brute_force || a.threat === "brute_force") return "";
+  return ` ${threatBadge("brute_force")} <span class="sub" title="${esc(fmtTime(a.last_brute_force))}">${relTime(a.last_brute_force)}</span>`;
+}
+
 function renderAttackers(list) {
   threatByIp = new Map(list.map((a) => [a.ip, a.threat]));
   const body = el("attackers");
@@ -288,7 +294,7 @@ function renderAttackers(list) {
     const tone = (THREATS[a.threat] || {}).tone || "info";
     return `<tr class="row-${tone}">
       <td>${ipTag(a.ip, null, false)}${a.mac ? ` <span class="sub">${esc(a.mac)}</span>` : ""}</td>
-      <td>${threatBadge(a.threat)}</td>
+      <td>${threatBadge(a.threat)}${bruteTag(a)}</td>
       <td>${esc(a.auth_failures)} <span class="sub">(${esc(a.failures_10m)} w 10 min)</span></td>
       <td>${signals.join(", ") || "<span class='sub'>—</span>"}</td>
       <td>${relTime(a.first_seen)}</td>

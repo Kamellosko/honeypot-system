@@ -151,4 +151,56 @@ class ReportStoreAlertTest {
         assertEquals(4242, recent.get(0).port());
         assertFalse(recent.toString().contains("Tajne123"));
     }
+
+    @Test
+    void lastBruteForceSurvivesHigherLevel() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            fail("203.0.113.9", "root");
+        }
+        store.insert(report("authentication_success", null,
+                ",\"content\":\"Accepted password for backup_srv from 203.0.113.9 port 1 ssh2\""));
+        var a = store.attackers().get(0);
+        assertEquals("confirmed", a.threat());
+        assertTrue(a.lastBruteForce() != null);
+    }
+
+    @Test
+    void noBruteForceMeansNoLastBruteForce() throws Exception {
+        for (int i = 0; i < 4; i++) {
+            fail("203.0.113.9", "root");
+        }
+        assertEquals(null, store.attackers().get(0).lastBruteForce());
+    }
+
+    @Test
+    void alertIsRearmedAfterThirtyMinutesOfSilence() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            fail("203.0.113.9", "root");
+        }
+        assertEquals(1, notices.size());
+        // Push the stored history back an hour, then restart: the same IP returns after a long silence.
+        String old = Files.readString(file).replaceAll("\"received_at\":\"[^\"]+\"", "\"received_at\":\"2026-11-26T10:00:00Z\"");
+        Files.writeString(file, old);
+        notices.clear();
+        store = open();
+        assertTrue(notices.isEmpty());   // replay never mails
+        for (int i = 0; i < 5; i++) {
+            fail("203.0.113.9", "root");
+        }
+        assertEquals(1, notices.size());
+        assertEquals("brute_force", notices.get(0).attacker().threat());
+    }
+
+    @Test
+    void noRearmWithoutSilence() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            fail("203.0.113.9", "root");
+        }
+        notices.clear();
+        store = open();
+        for (int i = 0; i < 5; i++) {
+            fail("203.0.113.9", "root");
+        }
+        assertTrue(notices.isEmpty());
+    }
 }

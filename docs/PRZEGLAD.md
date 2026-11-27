@@ -114,7 +114,7 @@ Serwer serwuje też sam dashboard z katalogu `dashboard/`.
 ### Alarmy e-mail
 
 Gdy adres IP wejdzie na poziom `fast_enum` (skaner), `brute_force`, `bait` (próba na konto-przynętę albo odczyt okruszka) lub `confirmed`,
-serwer wysyła jeden mail. Pojedyncze nieudane logowania nie wysyłają maila (to głównie szum z Windowsów). Limit 60 maili na godzinę,
+serwer wysyła jeden mail; po 30 minutach ciszy z tego adresu kolejny atak znów wyśle mail. Pojedyncze nieudane logowania nie wysyłają maila (to głównie szum z Windowsów). Limit 60 maili na godzinę,
 bez haseł w treści. Domyślnie wyłączone; w laboratorium poczta trafia do lokalnej skrzynki na hoście (`scripts/setup-mail-host.sh`,
 `WDROZENIE-OD-ZERA.md` rozdz. 10a).
 

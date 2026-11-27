@@ -50,7 +50,7 @@ class AlertServiceTest {
 
     private static AlertNotice notice(String threat, String ip) {
         AttackerView v = new AttackerView(ip, null, threat, "2026-11-26T09:58:00Z", "2026-11-26T10:00:00Z",
-                0, 5, 5, 5, 5, 0, false, false, "append", false, 0, false);
+                0, 5, 5, 5, 5, 0, false, false, "append", false, 0, false, null);
         return new AlertNotice("fs-finanse", v, "5+ nieudanych logowań w 10 min",
                 List.of(new AlertNotice.Recent("2026-11-26T10:00:00Z", "auth.failure", "smb", "administrator", 49282)));
     }

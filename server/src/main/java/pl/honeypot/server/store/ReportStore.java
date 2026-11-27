@@ -32,6 +32,8 @@ public final class ReportStore {
     // remote IP seen here is hostile; these thresholds grade how hostile.
     private static final Duration FAIL_WINDOW = Duration.ofMinutes(10);
     private static final int FAIL_THRESHOLD = 5;            // brute force
+    // After this long without any activity from an IP, its next escalation is mailed again.
+    private static final Duration REARM_AFTER = Duration.ofMinutes(30);
     private static final Duration ENUM_WINDOW = Duration.ofSeconds(60);
     private static final int PORT_SCAN_THRESHOLD = 3;       // distinct local ports from one IP = scan
 
@@ -75,7 +77,8 @@ public final class ReportStore {
         boolean probed;           // service probe without a valid banner (net.probe, e.g. nmap -sV)
         long invalidUsers;        // logins to accounts that do not exist (auth.invalid_user)
         boolean decoyAttempt;     // tried to log in to a decoy account (confirmAccounts), even with a wrong password
-        String alertedLevel;      // highest level already reported (mailed, or seen while replaying history)
+        String alertedLevel;      // highest level already reported (mailed, or seen while replaying history); cleared after REARM_AFTER of silence
+        Instant lastBruteForce;   // last time the failure window reached FAIL_THRESHOLD (stays after the window empties)
         final Deque<AlertNotice.Recent> recent = new ArrayDeque<>();   // newest first, at most RECENT_MAX
     }
 
@@ -123,7 +126,8 @@ public final class ReportStore {
             @JsonProperty("last_operation") String lastOperation,
             @JsonProperty("probed") boolean probed,
             @JsonProperty("invalid_users") long invalidUsers,
-            @JsonProperty("decoy_attempt") boolean decoyAttempt) {
+            @JsonProperty("decoy_attempt") boolean decoyAttempt,
+            @JsonProperty("last_brute_force") String lastBruteForce) {
     }
 
     // Successful SSH login line; a login to one of confirmAccounts means the attacker used the breadcrumb password.
@@ -352,6 +356,10 @@ public final class ReportStore {
         if (s.firstSeen == null || at.isBefore(s.firstSeen)) {
             s.firstSeen = at;
         }
+        // Silence long enough: the IP is a fresh arrival again, so its next escalation is reported anew.
+        if (s.lastSeen != null && at.isAfter(s.lastSeen.plus(REARM_AFTER))) {
+            s.alertedLevel = null;
+        }
         touched.add(ip);
         return s;
     }
@@ -420,6 +428,9 @@ public final class ReportStore {
             s.authFailures++;
             s.failTimes.addLast(at);
             pruneOlderThan(s.failTimes, at.minus(FAIL_WINDOW));
+            if (s.failTimes.size() >= FAIL_THRESHOLD && (s.lastBruteForce == null || at.isAfter(s.lastBruteForce))) {
+                s.lastBruteForce = at;
+            }
         } else {
             s.connections++;
             if (localPort != null) {
@@ -514,7 +525,8 @@ public final class ReportStore {
         return new AttackerView(s.ip, s.mac, threatOf(s, now), iso(s.firstSeen), iso(s.lastSeen),
                 s.connections, s.authFailures, s.events, countSince(s.failTimes, now.minus(FAIL_WINDOW)),
                 countSince(s.eventTimes, now.minus(ENUM_WINDOW)), distinctPorts(s, now),
-                s.confirmed, s.breadcrumbRead, s.lastOperation, s.probed, s.invalidUsers, s.decoyAttempt);
+                s.confirmed, s.breadcrumbRead, s.lastOperation, s.probed, s.invalidUsers, s.decoyAttempt,
+                iso(s.lastBruteForce));
     }
 
     private static int rank(String threat) {
